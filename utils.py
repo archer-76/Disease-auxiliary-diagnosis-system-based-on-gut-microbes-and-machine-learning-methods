@@ -1,9 +1,8 @@
-from pickle import TRUE
-from typing import List
 import numpy as np
 import pandas as pd
 import torch
 from scipy.sparse import coo_matrix
+from sklearn.preprocessing import LabelEncoder
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 
@@ -11,25 +10,28 @@ smpl_path = './data/obesity.csv'
 a = './MENA network/t2d.csv'
 
 
-def get_dataset(smpl_path: str) -> List:
+def get_dataset(smpl_path: str) -> tuple:
     """Generate dataset from csv files.
 
     Args:
         smpl_path (str):
             Path of samples file.
-        y: 
+        y:
             Adjenct matrix of samples with shape of samples_num, samples_num
             y is generate by MENA, involved tons of diseased and healthy samples
     Returns:
         List: list of Data(x, edge_index).
     """
-    samples_df = pd.read_csv(smpl_path)
+    samples_df = pd.read_csv(smpl_path, header=None)
     # keep only the rows with at least n non-zero values
     samples_df = samples_df.replace(0, np.nan)
     samples_df = samples_df.dropna(thresh=10)
     samples_df = samples_df.replace(np.nan, 0)
-    y_list = samples_df.iloc[0:1, 1:].to_numpy()
-    samples = samples_df.iloc[:, 1:].to_numpy(dtype=np.float32)
+    y_list = samples_df.iloc[0, 1:].to_numpy()
+    le = LabelEncoder()
+    le = le.fit(['leaness', 'obesity'])
+    y_list = le.transform(y_list).reshape(1, -1)
+    samples = samples_df.iloc[1:, 1:].to_numpy(dtype=np.float32)
     assert (y_list.shape[1] == samples.shape[1])
     _, adj = construct_adj(samples)
     data_list = []
@@ -54,13 +56,13 @@ def get_edge_index(x: np.ndarray, y: np.ndarray, method: str):
     Args:
         x:
             a row of the OTU table, represent to a single sample, a Kranker.
-        y: 
+        y:
             Adjenct matrix of samples with shape of samples_num, samples_num
             y is generate by MENA, involved tons of diseased and healthy samples
         method:
             if index:
                 generate the edge_index by index
-            
+
     Returns:
         edge_index: shape of (2,interactions)
     """
