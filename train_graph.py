@@ -75,8 +75,6 @@ def train(train_loader):
         optimizer.zero_grad()
 
         out = model(data.x, data.edge_index, data.batch)
-        print(out.shape)
-        print(out)
         loss = criterion(out, data.y)
 
         loss.backward()
@@ -93,85 +91,6 @@ def test(loader):
         correct += int((pred == data.y).sum())  # 检查真实标签
     return correct / len(loader.dataset)
 
-
-# def train(optimizer, criterion, data_loader):
-#     for data in data_loader:
-#         optimizer.zero_grad()
-#         x, y = data
-#         if is_use_gpu:
-#             x, y = x.cuda(), y.cuda()
-#         out = model(data.x.cuda(), data.edge_index.cuda())
-#         loss = criterion(out, data.y)
-
-#         loss.backward()
-#         optimizer.step()
-
-# def train_model(model, data_loader):
-#     criterion = torch.nn.CrossEntropyLoss()
-#     # or use the
-#     optimizer = AdamW(model.parameters(),
-#                       lr=learning_rate,
-#                       weight_decay=weight_decay)
-
-#     for epoch in range(epoch_num):
-#         # initialize loss and accuracy
-#         train_loss = 0.
-#         train_acc = 0.
-#         train_precision = 0.
-#         train_recall = 0.
-#         train()
-
-#         # train on batches
-#         for _, data in enumerate(data_loader):
-#             # get batch
-#             x, y = data
-#             y = get_triu_items(y)
-#             if is_use_gpu:
-#                 x, y = x.cuda(), y.cuda()
-#             # forward
-#             z, y_hat = model(x)
-#             # backward
-#             optimizer.zero_grad()
-#             # loss = criterion(y_hat, y) + F.mse_loss(y_hat, y) * 100
-#             loss = criterion(y_hat, y)
-#             loss.backward()
-#             optimizer.step()
-#             # accumulate loss and accuracy
-#             train_loss += loss
-#             # train_acc += (abs(y - y_hat) < delta).float().mean()
-#             # true_y_hat = F.relu(1 - y_hat / contrasive_loss_m)
-#             zeros = torch.zeros(y.shape)
-#             if is_use_gpu:
-#                 zeros = zeros.cuda()
-#             true_y_hat = torch.maximum(zeros,
-#                                        -(y_hat / potential_loss_l - 1)**2 + 1)
-#             # precision
-#             cor_matrix = (np.abs(true_y_hat.cpu().detach().numpy()) >
-#                           0.).astype(float)
-#             intr_num = np.count_nonzero(cor_matrix)
-#             true_pos = np.count_nonzero(np.multiply(cor_matrix, y.cpu()))
-#             if intr_num != 0:
-#                 train_precision = true_pos / intr_num
-#             ground_truth_intr_num = np.count_nonzero(y.cpu())
-#             train_recall = true_pos / ground_truth_intr_num
-
-#         # get loss and accuracy of this epoch
-#         loader_step = len(data_loader)
-#         train_loss = train_loss / loader_step
-#         train_acc = train_acc / loader_step
-#         min_loss = min(min_loss, train_loss)
-#         # print training stats
-#         if epoch == 0 or (epoch + 1) % 10 == 0:
-#             print(
-#                 f'--- Epoch: {epoch+1:4d}, Loss: {train_loss:.6f}, Interations: {intr_num:6d}, True Pos :{true_pos:6d}, Precision: {train_precision:.2%}, Recall: {train_recall:.2%}'
-#             )
-
-#         # print some data for debug
-#         if (epoch + 1) == epoch_num:
-#             # print('z', z)
-#             print('y_hat', y_hat)
-#             print('true_y_hat', true_y_hat)
-#             print('y', y)
 
 if __name__ == '__main__':
     train_data_list = get_dataset(smpl_path)

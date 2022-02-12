@@ -38,7 +38,6 @@ def get_dataset(smpl_path: str) -> List:
         y = 1
         if y_list[:, i] == 0.:
             y = 0
-        print(y)
         edge_index = get_edge_index(x, adj, method="index")
         x = x.reshape((x.shape[0], 1))
         x = torch.as_tensor(x, dtype=torch.float32)
