@@ -22,7 +22,7 @@ def get_dataset(smpl_path: str) -> tuple:
     samples_df = pd.read_csv(smpl_path, header=None)
     # keep only the rows with at least n non-zero values
     samples_df = samples_df.replace(0, np.nan)
-    samples_df = samples_df.dropna(thresh=10)
+    samples_df = samples_df.dropna(thresh=15)
     samples_df = samples_df.replace(np.nan, 0)
     y_list = samples_df.iloc[0, 1:].to_numpy()
     le = LabelEncoder()
@@ -41,13 +41,15 @@ def get_dataset(smpl_path: str) -> tuple:
         x = torch.as_tensor(x, dtype=torch.float32)
         y = torch.as_tensor(y, dtype=int)
         assert (x.dim() == 2)
+        reversed_edge_index = torch.vstack(
+            (edge_index[1, :], edge_index[0, :]))
+        edge_index = torch.hstack((edge_index, reversed_edge_index))
         dense_y = torch.sparse_coo_tensor(edge_index,
                                           torch.ones(edge_index.shape[1]),
-                                          (x.shape[0], x.shape[0]))
+                                          torch.Size([x.shape[0], x.shape[0]]))
         dense_y = dense_y.to_dense()
-        dense_y = torch.logical_or(dense_y, dense_y.T).type(torch.float32)
-        dense_y = dense_y.fill_diagonal_(1.)
-        data = Data(x=x, y=y, adj=dense_y)
+        adj = dense_y.fill_diagonal_(1.)
+        data = Data(x=x, y=y, adj=adj)
         data_list.append(data)
 
     return data_list
