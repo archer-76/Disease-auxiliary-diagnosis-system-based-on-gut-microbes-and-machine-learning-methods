@@ -4,10 +4,7 @@ import torch
 from scipy.sparse import coo_matrix
 from sklearn.preprocessing import LabelEncoder
 from torch_geometric.data import Data
-from torch_geometric.loader import DataLoader
-
-smpl_path = './data/obesity.csv'
-a = './MENA network/t2d.csv'
+from torch_geometric.loader import DenseDataLoader
 
 
 def get_dataset(smpl_path: str) -> tuple:
@@ -29,7 +26,8 @@ def get_dataset(smpl_path: str) -> tuple:
     samples_df = samples_df.replace(np.nan, 0)
     y_list = samples_df.iloc[0, 1:].to_numpy()
     le = LabelEncoder()
-    le = le.fit(['leaness', 'obesity'])
+    le = le.fit(['n', 't2d'])
+    # le = le.fit(['leaness', 'obesity'])
     y_list = le.transform(y_list).reshape(1, -1)
     samples = samples_df.iloc[1:, 1:].to_numpy(dtype=np.float32)
     assert (y_list.shape[1] == samples.shape[1])
@@ -37,14 +35,19 @@ def get_dataset(smpl_path: str) -> tuple:
     data_list = []
     for i in range(samples.shape[1]):
         x = samples[:, i]
-        y = 1
-        if y_list[:, i] == 0.:
-            y = 0
+        y = y_list[:, i]
         edge_index = get_edge_index(x, adj, method="index")
         x = x.reshape((x.shape[0], 1))
         x = torch.as_tensor(x, dtype=torch.float32)
+        y = torch.as_tensor(y, dtype=int)
         assert (x.dim() == 2)
-        data = Data(x=x, y=y, edge_index=edge_index)
+        dense_y = torch.sparse_coo_tensor(edge_index,
+                                          torch.ones(edge_index.shape[1]),
+                                          (x.shape[0], x.shape[0]))
+        dense_y = dense_y.to_dense()
+        dense_y = torch.logical_or(dense_y, dense_y.T).type(torch.float32)
+        dense_y = dense_y.fill_diagonal_(1.)
+        data = Data(x=x, y=y, adj=dense_y)
         data_list.append(data)
 
     return data_list
@@ -100,7 +103,7 @@ def get_dataset_for_MENA(smpl_path: str, flag=True):
 # 在测试后，cutoff为0.62，0.64，0.68的时候卡方检验泊松分布转化完成
 # p-value分别为0.05,0.01,0.001，此x必须是t2d数据集
 # 如果更换数据集，请重新使用MENA软件测试
-def construct_adj(x: np.ndarray, score_thresh=0.61):
+def construct_adj(x: np.ndarray, score_thresh=0.32):
     """construct the enormous adjenct matrix.
 
     Args:
@@ -121,6 +124,3 @@ def construct_adj(x: np.ndarray, score_thresh=0.61):
     return edge_index, adj
 
     # get_dataset_for_MENA(a, False)
-
-
-train_data_list = get_dataset(smpl_path)
