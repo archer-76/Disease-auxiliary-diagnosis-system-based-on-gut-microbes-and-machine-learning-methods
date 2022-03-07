@@ -1,3 +1,4 @@
+from turtle import forward
 from unittest import loader
 from matplotlib.pyplot import get
 import torch
@@ -7,6 +8,7 @@ from utils import *
 from torch_geometric.nn import SAGEConv
 from torch_geometric.nn import GATConv
 from torch_geometric.nn import global_mean_pool
+from torch_geometric.nn import BatchNorm as BN1d
 from torch_geometric.nn import DenseGCNConv as GCNConv, dense_diff_pool
 from torch.optim import Adam, AdamW
 from torch_geometric.datasets import TUDataset
@@ -38,23 +40,35 @@ class GNN(torch.nn.Module):
         self.bns = torch.nn.ModuleList()
 
         self.convs.append(GCNConv(in_channels, hidden_channels, normalize))
-        self.bns.append(torch.nn.BatchNorm1d(hidden_channels))
+        self.bns.append(BN1d(hidden_channels))
 
         self.convs.append(GCNConv(hidden_channels, hidden_channels, normalize))
-        self.bns.append(torch.nn.BatchNorm1d(hidden_channels))
+        self.bns.append(BN1d(hidden_channels))
 
         self.convs.append(GCNConv(hidden_channels, out_channels, normalize))
-        self.bns.append(torch.nn.BatchNorm1d(out_channels))
+        self.bns.append(BN1d(out_channels))
         # self.lin = Linear(hidden_channels, out_channels)
 
     def forward(self, x, adj, useless):
         for step in range(len(self.convs)):
-            tmp = F.relu(self.convs[step](x, adj))
-            print(tmp.shape)
+            tmp = F.relu(self.convs[step](x, adj, mask=None))
+            tmp = tmp.reshape((tmp.shape[1], -1))
             x = self.bns[step](tmp)
-            print('adj', adj)
-            print('useless', useless)
         return x
+
+    # this forward used for mutiple graphs
+    # def forward(self, x, adj, useless):
+    #     for step in range(len(self.convs)):
+    #         tmp = F.relu(self.convs[step](x, adj))
+    #         x_shape0 = x.shape[0]
+    #         # torch.Size([16, 290, 64])
+    #         # 这里的维度维度要求应该同上，而不是290
+    #         # bn1d是作用在290这个维度上的，想办法让他作用在64上
+    #         for graph in range(tmp.shape[0]):
+    #             tmp_x = self.bns[step](tmp[graph])
+    #             x = torch.vstack((tmp_x, tmp_x))
+    #     assert (x.shape[0] == x_shape0)
+    #     return x
 
 
 class DiffPool(torch.nn.Module):
@@ -62,7 +76,7 @@ class DiffPool(torch.nn.Module):
                  num_features,
                  hidden_channels,
                  num_classes,
-                 max_nodes=250,
+                 max_nodes=400,
                  normalize=False):
         super(DiffPool, self).__init__()
         num_nodes = ceil(0.25 * max_nodes)
@@ -88,6 +102,17 @@ class DiffPool(torch.nn.Module):
         self.lin2 = torch.nn.Linear(hidden_channels, num_classes)
 
     def forward(self, x: torch.tensor, adj: torch.Tensor, mask=None):
+        '''
+            args:
+                input: 
+                    should be a single graph's batch, 
+                    which means batch consists of nodes but not graphs
+                output: 
+                    out value for the criterion, in this 2-class classification task
+                    value should be like ( float , float ) with shape (1,2)
+
+        
+        '''
         # 用词向量的方式，扩充节点特征从1维到64维
         # embedding = torch.nn.Embedding(x.shape[1], 64)
         # print(x.shape)
@@ -103,40 +128,57 @@ class DiffPool(torch.nn.Module):
         #     (x.detach().cpu().shape[0], x.detach().cpu().shape[0]))
         # dense_y = dense_y.to_dense()
         # adj = dense_y.fill_diagonal_(1.).to(device)
-        print(adj.shape)
+        # s.shape should be B*N*C
         s = self.gnn1_pool(x, adj, mask)
+        # s.shape should be B*N*F
         x = self.gnn1_embed(x, adj, mask)
         x, adj, l1, e1 = dense_diff_pool(x, adj, s, mask)
         #x_1 = s_0.t() @ z_0
         #adj_1 = s_0.t() @ adj_0 @ s_0
 
-        s = self.gnn2_pool(x, adj)
-        x = self.gnn2_embed(x, adj)
+        # s = self.gnn2_pool(x, adj, mask)
+        # x = self.gnn2_embed(x, adj, mask)
 
-        x, adj, l2, e2 = dense_diff_pool(x, adj, s)
+        # x, adj, l2, e2 = dense_diff_pool(x, adj, s)
 
-        x = self.gnn3_embed(x, adj)
+        x = self.gnn3_embed(x, adj, mask)
 
         x = x.mean(dim=1)
         x = F.relu(self.lin1(x))
         x = self.lin2(x)
-        return x, l1 + l2, e1 + e2
+        # return F.log_softmax(x, dim=-1), l1 + l2, e1 + e2
+        return F.log_softmax(x, dim=-1), l1, e1
 
 
 # # model = GCN(hidden_channels=64)
 model = DiffPool(num_features=1, hidden_channels=64, num_classes=2).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-criterion = torch.nn.CrossEntropyLoss()
+# criterion = torch.nn.CrossEntropyLoss()
+# criterion = F.nll_loss()
+# output, data.y.view(-1)
 
 
 def train(train_loader):
     model.train()
     train_loss = 0.
-    for data in train_loader:
-        data = data.to(device)
-        optimizer.zero_grad()
-        out = model(data.x, data.adj)
-        loss = criterion(out, data.y)
+    # 一个batch读取出来16张图
+    for i, batch in enumerate(train_loader):
+        batch = batch.to(device)
+        x, adj, y = batch.x, batch.adj, batch.y
+        # 对16个图都分别训练：
+        loss = torch.tensor([0.]).to(device)
+        for j in range(x.shape[0]):
+            data = Data(x=x[j].reshape((x[j].shape[0], -1)),
+                        y=y[j].reshape((-1)),
+                        adj=adj[j].reshape((adj[j].shape[1], -1)))
+            optimizer.zero_grad()
+            out, _, _ = model(data.x, data.adj)
+            out = out.reshape((1, out.shape[0]))
+            assert (out.dim() == 2)
+            # loss += criterion(out, y[j])
+            loss += F.nll_loss(out, y[j])
+        # 这里的batchsize不对，留待后续处理
+        loss /= batch_size
         loss.backward()
         train_loss += loss
         optimizer.step()
@@ -145,7 +187,6 @@ def train(train_loader):
 
 def test(loader):
     model.eval()
-
     correct = 0
     for data in loader:  # 批遍历测试集数据集。
         data = data.to(device)
