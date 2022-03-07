@@ -129,31 +129,117 @@ class DiffPool(torch.nn.Module):
         # dense_y = dense_y.to_dense()
         # adj = dense_y.fill_diagonal_(1.).to(device)
         # s.shape should be B*N*C
-        s = self.gnn1_pool(x, adj, mask)
+        s = x
+        s = self.gnn1_pool(s, adj, mask)
+        # s = self.gnn1_pool(x, adj, mask)
         # s.shape should be B*N*F
         x = self.gnn1_embed(x, adj, mask)
         x, adj, l1, e1 = dense_diff_pool(x, adj, s, mask)
         #x_1 = s_0.t() @ z_0
         #adj_1 = s_0.t() @ adj_0 @ s_0
-
+        s = x
+        s = self.gnn2_pool(s, adj, mask)
         # s = self.gnn2_pool(x, adj, mask)
-        # x = self.gnn2_embed(x, adj, mask)
+        x = self.gnn2_embed(x, adj, mask)
 
-        # x, adj, l2, e2 = dense_diff_pool(x, adj, s)
+        x, adj, l2, e2 = dense_diff_pool(x, adj, s)
 
         x = self.gnn3_embed(x, adj, mask)
 
         x = x.mean(dim=1)
         x = F.relu(self.lin1(x))
         x = self.lin2(x)
-        # return F.log_softmax(x, dim=-1), l1 + l2, e1 + e2
-        return F.log_softmax(x, dim=-1), l1, e1
+        return x, l1 + l2, e1 + e2
+        # return F.log_softmax(x, dim=-1), l1, e1
+
+
+class BatchedDiffPool(torch.nn.Module):
+    def __init__(self,
+                 num_features,
+                 hidden_channels,
+                 num_nodes,
+                 is_final=False):
+        super(BatchedDiffPool, self).__init__()
+        self.embed = GNN(num_features, hidden_channels, num_nodes)
+        self.pool = GNN(num_features, hidden_channels, hidden_channels)
+        self.link_pred_loss = 0
+        self.entropy_loss = 0
+
+    def forward(self, x: torch.tensor, adj: torch.Tensor, mask=None):
+        z_l = self.embed(x, adj)
+        s_l = F.softmax(self.pool(x, adj), dim=-1)
+        x, adj, l, e = dense_diff_pool(z_l, adj, s_l, mask)
+        self.link_pred_loss = l
+        self.entropy_loss = e
+        return x, adj
+
+
+class Classifier(torch.nn.Module):
+    def __init__(self, input_shape=30, n_classes=2):
+        super().__init__()
+        self.classifier = torch.nn.Sequential(torch.nn.Linear(input_shape, 50),
+                                              torch.nn.ReLU(),
+                                              torch.nn.Linear(50, n_classes))
+
+    def forward(self, x):
+        return self.classifier(x)
+
+
+class BatchedModel(torch.nn.Module):
+    def __init__(self,
+                 hidden_channels,
+                 pool_size,
+                 input_shape,
+                 n_classes,
+                 link_pred=False):
+        super().__init__()
+        self.input_shape = input_shape
+        self.link_pred = link_pred
+        self.device = device
+        self.layers = torch.nn.ModuleList([
+            GNN(input_shape, hidden_channels, 30),
+            GNN(30, hidden_channels, 30),
+            BatchedDiffPool(30, pool_size, 30),
+            GNN(30, hidden_channels, 30),
+            GNN(30, hidden_channels, 30),
+            BatchedDiffPool(30, 1, 30, is_final=True)
+        ])
+        self.classifier = Classifier(30, n_classes)
+
+    def forward(self, x, adj, mask):
+        for layer in self.layers:
+            if isinstance(layer, GNN):
+                if mask.shape[1] == x.shape[1]:
+                    x = layer(x, adj, mask)
+                else:
+                    x = layer(x, adj)
+            elif isinstance(layer, BatchedDiffPool):
+                # TODO: Fix if condition
+                if mask.shape[1] == x.shape[1]:
+                    x, adj = layer(x, adj, mask)
+                else:
+                    x, adj = layer(x, adj)
+
+        # x = x * mask
+        readout_x = x.sum(dim=1)
+        return readout_x
+
+    def loss(self, output, labels):
+        criterion = torch.nn.CrossEntropyLoss()
+        loss = criterion(output, labels)
+        if self.link_pred:
+            # 在计算池化层时，这部分应该被单独计算
+            for layer in self.layers:
+                if isinstance(layer, BatchedDiffPool):
+                    loss = loss + layer.link_pred_loss.mean(
+                    ) + layer.entropy_loss.mean()
+        return loss
 
 
 # # model = GCN(hidden_channels=64)
 model = DiffPool(num_features=1, hidden_channels=64, num_classes=2).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-# criterion = torch.nn.CrossEntropyLoss()
+criterion = torch.nn.CrossEntropyLoss()
 # criterion = F.nll_loss()
 # output, data.y.view(-1)
 
@@ -172,13 +258,14 @@ def train(train_loader):
                         y=y[j].reshape((-1)),
                         adj=adj[j].reshape((adj[j].shape[1], -1)))
             optimizer.zero_grad()
-            out, _, _ = model(data.x, data.adj)
+            out, lp, le = model(data.x, data.adj)
             out = out.reshape((1, out.shape[0]))
             assert (out.dim() == 2)
-            # loss += criterion(out, y[j])
-            loss += F.nll_loss(out, y[j])
+            loss += criterion(out, y[j]) + lp + le
+            # loss += F.nll_loss(out, y[j])
         # 这里的batchsize不对，留待后续处理
         loss /= batch_size
+        loss += 0 * sum([x.sum() for x in model.parameters()])
         loss.backward()
         train_loss += loss
         optimizer.step()
