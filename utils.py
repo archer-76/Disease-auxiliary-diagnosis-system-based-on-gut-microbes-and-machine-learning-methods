@@ -126,3 +126,31 @@ def construct_adj(x: np.ndarray, score_thresh=0.32):
     return edge_index, adj
 
     # get_dataset_for_MENA(a, False)
+
+
+class CollateFn:
+    def __init__(self, device='cpu'):
+        self.device = device
+
+    def __call__(self, batch):
+        adj_tensor_list = []
+        features_list = []
+        mask_list = []
+        # (adj, features), labels = list(zip(*batch))
+        max_num_nodes = max([g[0][0].shape[0] for g in batch])
+        labels = []
+        for (A, F), L in batch:
+            labels.append(L)
+            length = A.shape[0]
+            pad_len = max_num_nodes - length
+            adj_tensor_list.append(
+                np.pad(A, ((0, pad_len), (0, pad_len)), mode='constant'))
+            features_list.append(
+                np.pad(F, ((0, pad_len), (0, 0)), mode='constant'))
+            mask = np.zeros(max_num_nodes)
+            mask[:length] = 1
+            mask_list.append(mask)
+        return torch.from_numpy(np.stack(adj_tensor_list, 0)).float().to(self.device), \
+               torch.from_numpy(np.stack(features_list, 0)).float().to(self.device), \
+               torch.from_numpy(np.stack(mask_list, 0)).float().to(self.device), \
+               torch.from_numpy(np.stack(labels, 0)).long().to(self.device)
