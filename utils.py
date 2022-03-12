@@ -17,7 +17,7 @@ def get_dataset(smpl_path: str) -> tuple:
             Adjenct matrix of samples with shape of samples_num, samples_num
             y is generate by MENA, involved tons of diseased and healthy samples
     Returns:
-        List: list of Data(x, edge_index).
+        List: list of Data(x, edge_index) every data is a sub_graph.
     """
     samples_df = pd.read_csv(smpl_path, header=None)
     # keep only the rows with at least n non-zero values
