@@ -171,7 +171,8 @@ class BatchedGraphSAGE(torch.nn.Module):
         h_k = F.relu(h_k)
         if self.use_bn:
             self.bn = torch.nn.BatchNorm1d(h_k.size(1)).to(self.device)
-            h_k = self.bn(h_k)
+            if (h_k.shape[0] != 1):
+                h_k = self.bn(h_k)
         if mask is not None:
             h_k = h_k * mask.unsqueeze(2).expand_as(h_k)
         return h_k
@@ -281,14 +282,16 @@ class BatchedModel(torch.nn.Module):
     def forward(self, x, adj, mask):
         for i, layer in enumerate(self.layers):
             if isinstance(layer, BatchedGraphSAGE):
-                if mask.shape[1] == x.shape[1]:
-                    x = layer(x, adj, mask)
+                if mask is not None:
+                    if mask.shape[1] == x.shape[1]:
+                        x = layer(x, adj, mask)
                 else:
                     x = layer(x, adj)
             elif isinstance(layer, BatchedDiffPool):
                 # TODO: Fix if condition
-                if mask.shape[1] == x.shape[1]:
-                    x, adj = layer(x, adj, mask)
+                if mask is not None:
+                    if mask.shape[1] == x.shape[1]:
+                        x, adj = layer(x, adj, mask)
                 else:
                     x, adj = layer(x, adj)
             # print('x', x.shape)
