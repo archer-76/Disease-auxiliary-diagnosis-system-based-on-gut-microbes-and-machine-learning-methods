@@ -1,4 +1,5 @@
 import random
+from click import Parameter
 import torch
 import torch.nn.functional as F
 from torch_geometric.nn import DenseGCNConv as GCNConv, dense_diff_pool
@@ -13,19 +14,20 @@ from models import *
 # DEBUG
 import os
 
-# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-# device = torch.device('cpu')
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+# device = torch.device('cpu')
+
 model_path = './models/gmlp_model.pth'
-smpl_path = './data/t2d.csv'
-a = './MENA network/t2d.csv'
-b = './MENA network/t2d_1.csv'
+smpl_path = './data/samples.csv'
+
 batch_size = 1
 learning_rate = 1e-4
 weight_decay = 1e-3
-epoch_num = 100
-train_radio = 2. / 3
+epoch_num = 10
+train_radio = 0.8
+valid_radio = 0.5 - train_radio / 2
 
 is_use_gpu = torch.cuda.is_available()
 is_save_model = True
@@ -91,21 +93,6 @@ def batched_train(train_loader, model):
     #             (y[1].shape[0], -1, adj[1].shape[1])), batch[1], ptr[1]
     # for i, (x, y, adj, batch, ptr) in enumerate(train_loader):
     for i, data in enumerate(train_loader):
-        #     print(data)
-        # return 1, 2
-        #     if edge_index is not None:
-        #         dense_y = torch.sparse_coo_tensor(
-        #             edge_index[1], torch.ones(edge_index[1].shape[1]),
-        #             torch.Size([x[1].shape[0], x[1].shape[0]]))
-        #         adj = dense_y.to_dense()
-        #     print(x[1].shape, y[1].shape, edge_index[1].shape, adj.shape,
-        #           batch[1].shape, ptr[1].shape)
-        #     x, y, adj, batch, ptr = x[1].reshape(
-        #         (y[1].shape[0], -1, x[1].shape[1])), y[1], adj[1].reshape(
-        #             (y[1].shape[0], -1, adj[1].shape[1],
-        #              adj[1].shape[2])), batch[1], ptr[1]
-        #     print(adj[0][0][0])
-        #     print(adj[0])
         x, edge_index, y = data.x, data.edge_index, data.y
         dense_y = torch.sparse_coo_tensor(edge_index,
                                           torch.ones(edge_index.shape[1]),
@@ -114,11 +101,12 @@ def batched_train(train_loader, model):
         if adj.dim() == 2:
             x = x.reshape((1, x.shape[0], x.shape[1]))
             adj = adj.reshape((1, adj.shape[0], adj.shape[1]))
-        adj = adj @ adj
+        # adj = adj @ adj
         x, adj, y = x.to(device), adj.to(device), y.to(device)
         out = model(x, adj, None)
         out = out.reshape((out.shape[0], -1))
         loss = model.loss(out, y)
+        # print(f'train{i}th', out, y)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
         optimizer.step()
@@ -154,15 +142,16 @@ def batched_test(test_loader, model):
 
 
 if __name__ == '__main__':
-    data_list = get_dataset(smpl_path)
+    data_list = get_dataset(smpl_path, muti_target=False)
     # data_list = get_benchmark_dataset()
     # random.shuffle(data_list)
     # train_list = data_list[:ceil(2 / 3 * len(data_list))]
     # test_list = data_list[ceil(2 / 3 * len(data_list)):]
     train_list, test_list, validation_list = random_split(
-        data_list, (len(data_list) - ceil(1 / 6 * len(data_list)) -
-                    ceil(1 / 6 * len(data_list)), ceil(
-                        1 / 6 * len(data_list)), ceil(1 / 6 * len(data_list))))
+        data_list,
+        (int(train_radio * len(data_list)), int(valid_radio * len(data_list)),
+         (len(data_list) - int(train_radio * len(data_list)) -
+          int(valid_radio * len(data_list)))))
     train_loader = DataLoader(train_list,
                               batch_size,
                               shuffle=True,
@@ -175,9 +164,15 @@ if __name__ == '__main__':
                              batch_size,
                              shuffle=True,
                              collate_fn=CollateFn(device))
-    maxmum_nodes = 100
+    input_shape = train_list[0].x.shape[1]
+    classes = max([item.y for item in data_list]) + 1
+    maxmum_nodes = max([item.x.shape[0] for item in data_list])
     pool_size = ceil(maxmum_nodes * 0.25)
-    model = BatchedModel(pool_size, 1, 2, device).to(device)
+    print(pool_size, input_shape, classes)
+    model = BatchedModel(pool_size,
+                         input_shape=input_shape,
+                         n_classes=int(classes),
+                         device=device).to(device)
     optimizer = optim.Adam(model.parameters())
     for e in tqdm(range(epoch_num)):
         true_sample, train_loss = batched_train(train_loader, model)
@@ -185,7 +180,7 @@ if __name__ == '__main__':
         validation_true_sample = batched_test(validation_loader, model)
         validation_acc = validation_true_sample / len(validation_list)
         tqdm.write(
-            f"Epoch:{e}  \t train_acc:{train_acc:.2f}\t validation_acc:{validation_acc:.2f} \t train_loss:{train_loss:.2f}"
+            f"Epoch:{e+1}  \t train_acc:{train_acc:.2f}\t validation_acc:{validation_acc:.2f} \t train_loss:{train_loss:.2f}"
         )
         # print(
         #     # f'Epoch: {epoch:03d}, Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}'
