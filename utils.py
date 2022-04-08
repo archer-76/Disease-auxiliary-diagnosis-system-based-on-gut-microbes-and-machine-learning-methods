@@ -23,7 +23,6 @@ def get_benchmark_dataset(dataset_name='ENZYMES'):
         data = dataset[i]
         data = Data(x=data.x, y=data.y, edge_index=data.edge_index)
         datalist.append(data)
-    print(type(datalist[0]), datalist[0])
     return datalist
 
 
@@ -42,7 +41,17 @@ def get_dataset(smpl_path: str, muti_target: Boolean = False):
     Returns:
         List: list of Data(x, edge_index) every data is a sub_graph.
     """
-    samples_df = pd.read_csv(smpl_path, header=None, dtype={"disease": str})
+    samples_df = pd.read_csv(smpl_path,
+                             header=None,
+                             dtype={
+                                 "disease": str,
+                                 'n': float,
+                                 'obesity': float,
+                                 't2d': float,
+                                 'ibd': float,
+                                 'adenoma': float,
+                                 'cirrhosis': float
+                             })
     # keep only the rows with at least n non-zero values
     samples_df = samples_df.replace(0, np.nan)
     samples_df = samples_df.dropna(thresh=50)
@@ -50,7 +59,6 @@ def get_dataset(smpl_path: str, muti_target: Boolean = False):
     y_list = samples_df.iloc[0, 1:].to_numpy()
     le = LabelEncoder()
     le = le.fit(['n', 't2d', 'obesity', 'ibd', 'adenoma', 'cirrhosis'])
-    print(le.classes_)
     # le = le.fit(['leaness', 'obesity'])
     y_list = le.transform(y_list).reshape(1, -1)
     # 按照首字母排序，n的下标为3，第四个，如果不是多分类任务，设置n为0，其他为1
@@ -61,6 +69,7 @@ def get_dataset(smpl_path: str, muti_target: Boolean = False):
     assert (y_list.shape[1] == samples.shape[1])
     print('sample.shape[0]', samples.shape[0])
     giant_edge_index, adj = construct_adj(samples)
+    # 41041中，共有569个边
     print('giant_edge_index.shape', giant_edge_index.shape)
     data_list = []
     for i in range(samples.shape[1]):
@@ -148,7 +157,7 @@ def get_dataset_for_MENA(smpl_path: str, flag=True):
 # p-value分别为0.05,0.01,0.001，此x必须是t2d数据集
 # 如果更换数据集，请重新使用MENA软件测试http://ieg4.rccc.ou.edu/mena/
 # 对于giant_matrix多次检验结果分别是0.66，0.68，0.69
-def construct_adj(x: np.ndarray, score_thresh=0.34):
+def construct_adj(x: np.ndarray, score_thresh=0.2):
     """construct the enormous adjenct matrix.
 
     Args:

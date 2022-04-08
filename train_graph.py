@@ -25,8 +25,8 @@ smpl_path = './data/samples.csv'
 batch_size = 1
 learning_rate = 1e-4
 weight_decay = 1e-3
-epoch_num = 10
-train_radio = 0.8
+epoch_num = 100
+train_radio = 0.5
 valid_radio = 0.5 - train_radio / 2
 
 is_use_gpu = torch.cuda.is_available()
@@ -93,6 +93,7 @@ def batched_train(train_loader, model):
     #             (y[1].shape[0], -1, adj[1].shape[1])), batch[1], ptr[1]
     # for i, (x, y, adj, batch, ptr) in enumerate(train_loader):
     for i, data in enumerate(train_loader):
+        # x, adj, y = data.x, data.adj, data.y
         x, edge_index, y = data.x, data.edge_index, data.y
         dense_y = torch.sparse_coo_tensor(edge_index,
                                           torch.ones(edge_index.shape[1]),
@@ -106,7 +107,6 @@ def batched_train(train_loader, model):
         out = model(x, adj, None)
         out = out.reshape((out.shape[0], -1))
         loss = model.loss(out, y)
-        # print(f'train{i}th', out, y)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
         optimizer.step()
@@ -132,7 +132,8 @@ def batched_test(test_loader, model):
         if adj.dim() == 2:
             x = x.reshape((1, x.shape[0], x.shape[1]))
             adj = adj.reshape((1, adj.shape[0], adj.shape[1]))
-        x, adj, y = x.to(device), adj.to(device), y.to(device)
+        x, adj, edge_index, y = x.to(device), adj.to(device), edge_index.to(
+            device), y.to(device)
         out = model(x, adj, None)
         out = out.reshape((out.shape[0], -1))
         iter_true_sample = (out.argmax(dim=1).long() == y.long()). \
@@ -142,8 +143,8 @@ def batched_test(test_loader, model):
 
 
 if __name__ == '__main__':
-    data_list = get_dataset(smpl_path, muti_target=False)
-    # data_list = get_benchmark_dataset()
+    # data_list = get_dataset(smpl_path, muti_target=False)
+    data_list = get_benchmark_dataset()
     # random.shuffle(data_list)
     # train_list = data_list[:ceil(2 / 3 * len(data_list))]
     # test_list = data_list[ceil(2 / 3 * len(data_list)):]
@@ -164,13 +165,12 @@ if __name__ == '__main__':
                              batch_size,
                              shuffle=True,
                              collate_fn=CollateFn(device))
-    input_shape = train_list[0].x.shape[1]
+    in_feature = train_list[0].x.shape[1]
     classes = max([item.y for item in data_list]) + 1
     maxmum_nodes = max([item.x.shape[0] for item in data_list])
     pool_size = ceil(maxmum_nodes * 0.25)
-    print(pool_size, input_shape, classes)
     model = BatchedModel(pool_size,
-                         input_shape=input_shape,
+                         input_shape=in_feature,
                          n_classes=int(classes),
                          device=device).to(device)
     optimizer = optim.Adam(model.parameters())
