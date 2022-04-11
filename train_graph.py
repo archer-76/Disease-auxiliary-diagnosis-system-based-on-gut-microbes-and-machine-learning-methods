@@ -1,9 +1,5 @@
-import random
-from click import Parameter
 import torch
 import torch.nn.functional as F
-from torch_geometric.nn import DenseGCNConv as GCNConv, dense_diff_pool
-from torch.optim import Adam, AdamW
 from torch_geometric.loader import DataLoader
 from torch.utils.data import random_split
 from math import ceil
@@ -11,6 +7,7 @@ import torch.optim as optim
 from tqdm import tqdm
 from utils import *
 from models import *
+from sklearn import metrics
 # DEBUG
 import os
 
@@ -26,7 +23,7 @@ batch_size = 1
 learning_rate = 1e-4
 weight_decay = 1e-3
 epoch_num = 100
-train_radio = 0.5
+train_radio = 0.3
 valid_radio = 0.5 - train_radio / 2
 
 is_use_gpu = torch.cuda.is_available()
@@ -83,17 +80,11 @@ def unbatched_test(test_loader, model):
     return correct / num_graph
 
 
-def batched_train(train_loader, model):
+def batched_train(loader, model):
     model.train()
     epoch_loss = 0.
-    true_sample = 0
-    # for i, (x, y, adj, batch, ptr) in enumerate(train_loader):
-    #     x, y, adj, batch, ptr = x[1].reshape(
-    #         (y[1].shape[0], -1, x[1].shape[1])), y[1], adj[1].reshape(
-    #             (y[1].shape[0], -1, adj[1].shape[1])), batch[1], ptr[1]
-    # for i, (x, y, adj, batch, ptr) in enumerate(train_loader):
-    for i, data in enumerate(train_loader):
-        # x, adj, y = data.x, data.adj, data.y
+    iter_precise = 0.
+    for i, data in enumerate(loader):
         x, edge_index, y = data.x, data.edge_index, data.y
         dense_y = torch.sparse_coo_tensor(edge_index,
                                           torch.ones(edge_index.shape[1]),
@@ -112,18 +103,17 @@ def batched_train(train_loader, model):
         optimizer.step()
         optimizer.zero_grad()
         epoch_loss += loss.item()
-        iter_true_sample = (out.argmax(dim=1).long() == y.long()). \
-                float().sum().item()
-        iter_acc = float(iter_true_sample) / out.shape[0]
-        true_sample += iter_true_sample
-    return true_sample, epoch_loss / len(train_loader)
+        iter_precise = iter_precise + metrics.precision_score(
+            y.cpu().detach(),
+            out.cpu().detach().argmax(dim=1),
+            average='micro')
+    return epoch_loss / len(loader), iter_precise / len(loader)
 
 
-def batched_test(test_loader, model):
+def batched_test(loader, model, testing: bool = False):
     model.eval()
-    true_sample = 0
-
-    for i, data in enumerate(test_loader):
+    iter_precise = 0.
+    for i, data in enumerate(loader):
         x, edge_index, y = data.x, data.edge_index, data.y
         dense_y = torch.sparse_coo_tensor(edge_index,
                                           torch.ones(edge_index.shape[1]),
@@ -136,18 +126,18 @@ def batched_test(test_loader, model):
             device), y.to(device)
         out = model(x, adj, None)
         out = out.reshape((out.shape[0], -1))
-        iter_true_sample = (out.argmax(dim=1).long() == y.long()). \
-                float().sum().item()
-        true_sample += iter_true_sample
-    return true_sample
+        if testing:
+            print('out', out.argmax(dim=1), 'y', y)
+        iter_precise = iter_precise + metrics.precision_score(
+            y.cpu().detach(),
+            out.cpu().detach().argmax(dim=1),
+            average='micro')
+    return iter_precise / len(loader)
 
 
 if __name__ == '__main__':
-    # data_list = get_dataset(smpl_path, muti_target=False)
-    data_list = get_benchmark_dataset()
-    # random.shuffle(data_list)
-    # train_list = data_list[:ceil(2 / 3 * len(data_list))]
-    # test_list = data_list[ceil(2 / 3 * len(data_list)):]
+    data_list = get_dataset(smpl_path, muti_target=False)
+    # data_list = get_benchmark_dataset('PROTEINS')
     train_list, test_list, validation_list = random_split(
         data_list,
         (int(train_radio * len(data_list)), int(valid_radio * len(data_list)),
@@ -175,30 +165,16 @@ if __name__ == '__main__':
                          device=device).to(device)
     optimizer = optim.Adam(model.parameters())
     for e in tqdm(range(epoch_num)):
-        true_sample, train_loss = batched_train(train_loader, model)
-        train_acc = true_sample / len(train_list)
-        validation_true_sample = batched_test(validation_loader, model)
-        validation_acc = validation_true_sample / len(validation_list)
+        train_loss, train_precise = batched_train(train_loader, model)
+        valid_precise = batched_test(validation_loader, model)
         tqdm.write(
-            f"Epoch:{e+1}  \t train_acc:{train_acc:.2f}\t validation_acc:{validation_acc:.2f} \t train_loss:{train_loss:.2f}"
+            f'''Epoch:{e+1} \t train_precise:{train_precise:.3f} \t valid_precise:{valid_precise:.3f} \t train_loss:{train_loss:.3f}'''
         )
-        # print(
-        #     # f'Epoch: {epoch:03d}, Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}'
-        #     f'Epoch: {epoch:03d}, Train Acc: {train_acc:.4f}, loss: {loss.item():.4f}'
-        # )
     # model.load_state_dict(torch.load(model_path))
-    test_true_sample = batched_test(test_loader, model)
-    test_acc = test_true_sample / len(test_list)
-    print('test_acc', test_acc)
+    test_precise = batched_test(test_loader, model, True)
+    print('test_precise', test_precise)
     # save last model
     if is_save_model:
         torch.save(model.state_dict(), model_path)
     #
     # train_model(model, data_loader)
-
-# # model = GCN(hidden_channels=64)
-# model = DiffPool(num_features=1, hidden_channels=64, num_classes=2).to(device)
-# optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-# criterion = torch.nn.CrossEntropyLoss()
-# criterion = F.nll_loss()
-# output, data.y.view(-1)
