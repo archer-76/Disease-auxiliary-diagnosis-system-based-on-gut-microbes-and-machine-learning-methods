@@ -52,7 +52,7 @@ def get_dataset(smpl_path: str, muti_target: bool = False):
                              })
     # keep only the rows with at least n non-zero values
     samples_df = samples_df.replace(0, np.nan)
-    samples_df = samples_df.dropna(thresh=50)
+    samples_df = samples_df.dropna(thresh=30)
     samples_df = samples_df.replace(np.nan, 0)
 
     y_list = samples_df.iloc[0, 1:].to_numpy()
@@ -64,6 +64,7 @@ def get_dataset(smpl_path: str, muti_target: bool = False):
     y_list = le.transform(y_list).reshape(1, -1)
     # 按照首字母排序，n的下标为3，第四个，如果不是多分类任务，设置n为0，其他为1
     if (not muti_target):
+        print(np.max(y_list), np.min(y_list))
         y_list = np.where(y_list == 3, 0, 1)
         print(f'positive sample: {np.count_nonzero(y_list) }',
               f'out of: {len(y_list[0])} ',
@@ -77,9 +78,11 @@ def get_dataset(smpl_path: str, muti_target: bool = False):
 
     giant_edge_index, giant_adj = construct_adj(disease_list,
                                                 names='pcc mic  spm',
-                                                methods=(spm, pcc))
+                                                methods=(mic, spm, pcc),
+                                                score_thresh=0.4)
     print(
-        f'{np.count_nonzero(giant_adj)} pred out of{samples.shape[0]**2} true')
+        f'{np.count_nonzero(giant_adj)} pred out of {samples.shape[0]**2} true'
+    )
     print('giant_edge_index.shape', giant_edge_index.shape,
           np.count_nonzero(giant_adj))
     for i in range(samples.shape[1]):
@@ -104,7 +107,7 @@ def get_dataset(smpl_path: str, muti_target: bool = False):
 def construct_adj(xs: list,
                   names: str,
                   methods: tuple[function, ...],
-                  score_thresh=0.6):
+                  score_thresh=0.5):
     """construct the enormous adjenct matrix.
 
     Args:
@@ -117,36 +120,42 @@ def construct_adj(xs: list,
     # pre process
     print('loading giant')
     for x in xs:
+        print('non zero ', np.count_nonzero(x), ' out of total ',
+              np.count_nonzero(np.where(x == 0, np.max(x), x)))
         x /= np.min(np.where(x == 0, np.max(x), x))
-        x = np.where(x == 0, 1, x)
+        x = np.where(x == 0, (np.e)**(-1), x)
         x = np.log(x)
-        x *= 10
-        x += 0.01
+        x = np.where(x == -1, 0.01, x)
+
+        assert (not np.isnan(np.max(x)))
         # print('xmax', np.max(x), 'xavg', np.average(x))
 
     print('pre done')
-    cor_matrix = np.empty((xs[0].shape[0], xs[0].shape[0]))
+    cor_matrix = np.zeros((xs[0].shape[0], xs[0].shape[0]))
     # each disease
     for j, x in enumerate(xs):
-        cor_matrixs = np.empty((len(methods), len(x), len(x)))
+        cor_matrixs = np.zeros((len(methods), len(x), len(x)))
         # each method
         for i in range(len(methods)):
-            cor_matrixs[i] = methods[i](x)
+            # 忘了取绝对值
+            cor_matrixs[i] = np.abs(methods[i](x))
             np.fill_diagonal(cor_matrixs[i], 1)
-            # print('avg score', np.average(cor_matrixs[i]))
-            assert (not np.isnan(np.max(cor_matrix)))
-            cor_matrixs[i] = np.multiply(
-                cor_matrixs[i],
-                np.abs(cor_matrixs[i]) >= score_thresh)
+            cor_matrixs[i] = np.where(np.abs(cor_matrixs[i] >= score_thresh),
+                                      cor_matrixs[i], 0)
+            np.savetxt(f'data/matrix/cor_matrix{j} {i}.txt',
+                       cor_matrixs[i],
+                       fmt='%.2f')
+            assert (not np.isnan(np.max(cor_matrixs[i])))
+            # 这个结果没有起到筛选阈值的效果
+            np.multiply(cor_matrixs[i], np.abs(cor_matrixs[i]) >= score_thresh)
 
         for i in range(len(cor_matrixs)):
             cor_matrix = cor_matrix + cor_matrixs[i]
-
     # self loop and symmetric
     cor_matrix = cor_matrix + cor_matrix.T + np.eye(cor_matrix.shape[0])
-    np.save(f'data/mixed adj of {names}', cor_matrix)
     # 0 and 1 only
     cor_matrix = np.where(cor_matrix != 0, 1, 0)
+    np.savetxt(f'data/matrix/mixed adj of {names}.txt', cor_matrix, fmt='%.2f')
     # edge index
     adj_sparse = coo_matrix(cor_matrix)
     adj_indices = np.vstack((adj_sparse.row, adj_sparse.col))
@@ -234,31 +243,3 @@ def get_dataset_for_MENA(smpl_path: str, flag=True):
     else:
         df = samples_df.dropna(thresh=15)
     df.to_csv('./data/giant_matrix.csv', index=False)
-
-
-class CollateFn:
-    def __init__(self, device='cpu'):
-        self.device = device
-
-    def __call__(self, batch):
-        adj_tensor_list = []
-        features_list = []
-        mask_list = []
-        # (adj, features), labels = list(zip(*batch))
-        max_num_nodes = max([g[0][0].shape[0] for g in batch])
-        labels = []
-        for (A, F), L in batch:
-            labels.append(L)
-            length = A.shape[0]
-            pad_len = max_num_nodes - length
-            adj_tensor_list.append(
-                np.pad(A, ((0, pad_len), (0, pad_len)), mode='constant'))
-            features_list.append(
-                np.pad(F, ((0, pad_len), (0, 0)), mode='constant'))
-            mask = np.zeros(max_num_nodes)
-            mask[:length] = 1
-            mask_list.append(mask)
-        return torch.from_numpy(np.stack(adj_tensor_list, 0)).float().to(self.device), \
-               torch.from_numpy(np.stack(features_list, 0)).float().to(self.device), \
-               torch.from_numpy(np.stack(mask_list, 0)).float().to(self.device), \
-               torch.from_numpy(np.stack(labels, 0)).long().to(self.device)
