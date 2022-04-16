@@ -18,10 +18,10 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # device = torch.device('cpu')
 
 model_path = './models/gmlp_model.pth'
-smpl_path = './data/t2d.csv'
+smpl_path = './data/samples.csv'
 
 batch_size = 16
-learning_rate = 1e-4
+learning_rate = 1e-2
 weight_decay = 1e-3
 epoch_num = 500
 train_radio = 0.5
@@ -85,6 +85,7 @@ def batched_train(loader, model):
     model.train()
     epoch_loss = 0.
     iter_precise = 0.
+    timer = 0
     for _, batch in enumerate(loader):
         # 这里解决了一个问题，之前是放在batch之外的
         loss = 0.
@@ -102,10 +103,13 @@ def batched_train(loader, model):
             out = model(x, adj, None)
             out = out.reshape((out.shape[0], -1))
             loss += model.loss(out, y)
+            timer += 1
             iter_precise = iter_precise + metrics.precision_score(
                 y.cpu().detach(),
                 out.cpu().detach().argmax(dim=1),
                 average='micro')
+            # iter_precise = iter_precise + metrics.precision_score(
+            #     y.cpu().detach(), y.cpu().detach(), average='micro')
         loss.backward()
         # 梯度截断防止梯度爆炸导致过拟合，类似于dropout
         torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
@@ -113,12 +117,13 @@ def batched_train(loader, model):
         optimizer.zero_grad()
         epoch_loss += loss.item()
 
-    return epoch_loss / len(loader), iter_precise / len(loader) / batch_size
+    return epoch_loss / len(loader), iter_precise / timer
 
 
 def batched_test(loader, model, testing: bool = False):
     model.eval()
     iter_precise = 0.
+    timer = 0
     for _, batch in enumerate(loader):
         for data in batch.to_data_list():
             x, edge_index, y = data.x, data.edge_index, data.y
@@ -133,17 +138,19 @@ def batched_test(loader, model, testing: bool = False):
             x, adj, y = x.to(device), adj.to(device), y.to(device)
             out = model(x, adj, None)
             out = out.reshape((out.shape[0], -1))
+            timer += 1
             if testing:
                 print('out', out.argmax(dim=1), 'y', y)
             iter_precise = iter_precise + metrics.precision_score(
                 y.cpu().detach(),
                 out.cpu().detach().argmax(dim=1),
                 average='micro')
-    return iter_precise / len(loader) / batch_size
+
+    return iter_precise / timer
 
 
 if __name__ == '__main__':
-    data_list = get_dataset(smpl_path, muti_target=False)
+    data_list = get_dataset(smpl_path, muti_target=True, threshold=0.32)
     # data_list = get_benchmark_dataset('PROTEINS')
     train_list, test_list, validation_list = random_split(
         data_list,
@@ -155,6 +162,7 @@ if __name__ == '__main__':
     validation_loader = DataLoader(validation_list, batch_size)
     test_loader = DataLoader(test_list, batch_size)
 
+    valid_precise_list = np.zeros((1))
     in_feature = train_list[0].x.shape[1]
     classes = max([item.y for item in data_list]) + 1
     maxmum_nodes = max([item.x.shape[0] for item in data_list])
@@ -168,12 +176,14 @@ if __name__ == '__main__':
     for e in tqdm(range(epoch_num)):
         train_loss, train_precise = batched_train(train_loader, model)
         valid_precise = batched_test(validation_loader, model)
+        valid_precise_list = np.vstack((valid_precise_list, valid_precise))
         tqdm.write(
             f'''Epoch:{e+1} \t train_precise:{train_precise:.3f} \t valid_precise:{valid_precise:.3f} \t train_loss:{train_loss:.3f}'''
         )
     # model.load_state_dict(torch.load(model_path))
     test_precise = batched_test(test_loader, model, True)
-    print('test_precise', test_precise)
+    print('test_precise', test_precise, 'max_valid_precise',
+          np.max(valid_precise_list))
     # save last model
     if is_save_model:
         torch.save(model.state_dict(), model_path)

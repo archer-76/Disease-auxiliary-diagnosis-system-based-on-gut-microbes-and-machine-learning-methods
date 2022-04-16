@@ -22,7 +22,7 @@ def get_benchmark_dataset(dataset_name='ENZYMES'):
     return datalist
 
 
-def get_dataset(smpl_path: str, muti_target: bool = False):
+def get_dataset(smpl_path: str, muti_target: bool = False, threshold=0.4):
     """Generate dataset from csv files.
 
     Args:
@@ -51,15 +51,17 @@ def get_dataset(smpl_path: str, muti_target: bool = False):
                                  'cirrhosis': float
                              })
     # keep only the rows with at least n non-zero values
+    y_list = samples_df.iloc[0, 1:].to_numpy()
+    drop_thresh = int(0.15 * y_list.shape[0])
+    print(drop_thresh)
     samples_df = samples_df.replace(0, np.nan)
-    samples_df = samples_df.dropna(thresh=30)
+    samples_df = samples_df.dropna(thresh=drop_thresh)
     samples_df = samples_df.replace(np.nan, 0)
 
-    y_list = samples_df.iloc[0, 1:].to_numpy()
     samples = samples_df.iloc[1:, 1:].to_numpy(dtype=np.float32)
 
     le = LabelEncoder()
-    le = le.fit(['adenoma', 'cirrhosis', 'ibd', 'n', 'obesity', 't2d'])
+    le = le.fit(['adenoma', 'cirrhosis', 'ibd', 'n', 'obesity', 't2d', 'wt2d'])
     # le = le.fit(['leaness', 'obesity'])
     y_list = le.transform(y_list).reshape(1, -1)
     # 按照首字母排序，n的下标为3，第四个，如果不是多分类任务，设置n为0，其他为1
@@ -79,7 +81,7 @@ def get_dataset(smpl_path: str, muti_target: bool = False):
     giant_edge_index, giant_adj = construct_adj(disease_list,
                                                 names='pcc mic  spm',
                                                 methods=(mic, spm, pcc),
-                                                score_thresh=0.4)
+                                                score_thresh=threshold)
     print(
         f'{np.count_nonzero(giant_adj)} pred out of {samples.shape[0]**2} true'
     )
