@@ -17,6 +17,28 @@ import torch.optim as optim
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
+class CNNModel(nn.Module):
+    def __init__(self, in_dim, hidden_dim, out_dim):
+        super().__init__()
+        self.layer1 = nn.Sequential(nn.Conv1d(1, 8, 3, 1, 1),
+                                    nn.MaxPool1d(2, 2))
+        self.layer2 = nn.Sequential(nn.Conv1d(8, 16, 3, 1, 1),
+                                    nn.MaxPool1d(2, 2))
+        self.layer3 = nn.Sequential(nn.Conv1d(16, 1, 3, 1, 1),
+                                    nn.MaxPool1d(2, 2), nn.Flatten())
+        self.layer4 = nn.Sequential(nn.Linear(int(in_dim / 8), hidden_dim),
+                                    nn.ReLU())
+        self.layer5 = nn.Sequential(nn.Linear(hidden_dim, out_dim))
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.layer5(x)
+        return x
+
+
 class DiffPool(nn.Module):
     def __init__(self,
                  num_features,
@@ -446,14 +468,14 @@ class BatchedModel(nn.Module):
             BatchedGraphSAGE(30, 30, device=self.device),
             BatchedDiffPool(30, 1, 30, self.device)
         ])
-        self.gatlayers = nn.ModuleList([
-            BatchedGat(input_shape, 30, device=self.device),
-            BatchedGat(30, 30, device=self.device),
-            GatDiffPool(30, pool_size, 30, self.device, self.link_pred),
-            BatchedGat(30, 30, device=self.device),
-            BatchedGat(30, 30, device=self.device),
-            GatDiffPool(30, 1, 30, self.device)
-        ])
+        # self.gatlayers = nn.ModuleList([
+        #     BatchedGat(input_shape, 30, device=self.device),
+        #     BatchedGat(30, 30, device=self.device),
+        #     GatDiffPool(30, pool_size, 30, self.device, self.link_pred),
+        #     BatchedGat(30, 30, device=self.device),
+        #     BatchedGat(30, 30, device=self.device),
+        #     GatDiffPool(30, 1, 30, self.device)
+        # ])
         self.classifier = Classifier(30, n_classes)
 
     # def forward(self, x, adj, mask):

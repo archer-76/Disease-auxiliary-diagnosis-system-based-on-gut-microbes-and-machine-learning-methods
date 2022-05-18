@@ -6,9 +6,28 @@ from scipy.sparse import coo_matrix
 from sklearn.preprocessing import LabelEncoder
 from torch_geometric.data import Data
 # load dataset
+from sklearn.ensemble import RandomForestClassifier
 from torch_geometric.datasets import TUDataset
 from minepy import cstats, pstats
 from scipy.stats import spearmanr
+
+
+class feature_importance:
+    def __init__(self, feature, p):
+        self.feat_name = feature
+        self.imp = np.array([p] * len(feature))
+
+
+def compute_feature_importance(clf, feature):
+    # init fi
+    fi = feature_importance(feature, 0.0)
+    tmp = clf.feature_importances_
+    fi.imp[range(len(feature))] = tmp
+    # indices of descending fi
+    tmp = sorted(range(len(tmp)), key=lambda s: tmp[s], reverse=True)
+
+    fi.feat_name = [feature[s] for s in tmp if fi.imp[s] != 0]
+    return fi
 
 
 def get_benchmark_dataset(dataset_name='ENZYMES'):
@@ -22,7 +41,10 @@ def get_benchmark_dataset(dataset_name='ENZYMES'):
     return datalist
 
 
-def get_dataset(smpl_path: str, muti_target: bool = False, threshold=0.4):
+def get_dataset(disease_name: str,
+                threshold=40,
+                feature=90.,
+                muti_target: bool = False):
     """Generate dataset from csv files.
 
     Args:
@@ -37,41 +59,59 @@ def get_dataset(smpl_path: str, muti_target: bool = False, threshold=0.4):
     Returns:
         List: list of Data(x, edge_index) every data is a sub_graph.
     """
+    feature = feature / 100
+    threshold = threshold / 100
+
+    smpl_path = './back end/data/' + disease_name + '.csv'
+    disease = "1:disease:" + disease_name
     data_list = []
     disease_list = []
+    data = pd.DataFrame([])
     samples_df = pd.read_csv(smpl_path,
                              header=None,
-                             dtype={
-                                 "disease": str,
-                                 'n': float,
-                                 'obesity': float,
-                                 't2d': float,
-                                 'ibd': float,
-                                 'adenoma': float,
-                                 'cirrhosis': float
-                             })
+                             index_col=0,
+                             low_memory=False).T
+    samples_num = samples_df.shape[0]
+    data = data.append(samples_df)
+
+    # 去掉为全部为零的特征
+    feat = [s for s in data.columns if "k__" in s]
+    data.drop(data.loc[:, feat].columns[data.loc[:, feat].max().astype(
+        'float') == data.loc[:, feat].min().astype('float')],
+              axis=1,
+              inplace=True)
+
+    feat = [s for s in data.columns if "k__" in s]
+    k = int(feature * len(feat))
+
     # keep only the rows with at least n non-zero values
-    y_list = samples_df.iloc[0, 1:].to_numpy()
-    drop_thresh = int(0.15 * y_list.shape[0])
-    print(drop_thresh)
-    samples_df = samples_df.replace(0, np.nan)
-    samples_df = samples_df.dropna(thresh=drop_thresh)
-    samples_df = samples_df.replace(np.nan, 0)
+    drop_thresh = int(threshold * len(feat))
+    data = data.replace(0, np.nan)
+    data = data.dropna(thresh=drop_thresh)
+    data = data.replace(np.nan, 0)
 
-    samples = samples_df.iloc[1:, 1:].to_numpy(dtype=np.float32)
+    #样本标签
+    df = pd.DataFrame([disease.split(':')])
+    label = pd.DataFrame([0] * len(data))
+    label[(data[df.iloc[0, 1]].isin(df.iloc[0, 2:])).tolist()] = 1
+    #print(label.values.flatten())
+    # 讲特征的更新同步到数据
+    data = data.loc[:, feat].astype('float')
+    data = (data - data.min()) / (data.max() - data.min())
 
-    le = LabelEncoder()
-    le = le.fit(['adenoma', 'cirrhosis', 'ibd', 'n', 'obesity', 't2d', 'wt2d'])
-    # le = le.fit(['leaness', 'obesity'])
-    y_list = le.transform(y_list).reshape(1, -1)
+    if feature != 0:
+        clf = RandomForestClassifier(n_estimators=500,
+                                     max_depth=None,
+                                     min_samples_split=2,
+                                     n_jobs=-1)
+        clf.fit(data, label.values.flatten())
+        fi = compute_feature_importance(clf, feat)
+        data = data[fi.feat_name[:k]]
+
+    samples = data.to_numpy(dtype=np.float32).T
+
+    y_list = label.to_numpy(dtype=int).T
     # 按照首字母排序，n的下标为3，第四个，如果不是多分类任务，设置n为0，其他为1
-    if (not muti_target):
-        print(np.max(y_list), np.min(y_list))
-        y_list = np.where(y_list == 3, 0, 1)
-        print(f'positive sample: {np.count_nonzero(y_list) }',
-              f'out of: {len(y_list[0])} ',
-              f'positive rate: {np.count_nonzero(y_list)/len(y_list[0])}')
-
     for i in range(np.max(y_list) + 1):
         mask = y_list == i
         mask = mask.reshape((mask.shape[1]))
@@ -79,14 +119,12 @@ def get_dataset(smpl_path: str, muti_target: bool = False, threshold=0.4):
         disease_list.append(col)
 
     giant_edge_index, giant_adj = construct_adj(disease_list,
-                                                names='pcc mic  spm',
-                                                methods=(mic, spm, pcc),
+                                                names='pcc mic spm',
+                                                methods=(spm, pcc),
                                                 score_thresh=threshold)
     print(
         f'{np.count_nonzero(giant_adj)} pred out of {samples.shape[0]**2} true'
     )
-    print('giant_edge_index.shape', giant_edge_index.shape,
-          np.count_nonzero(giant_adj))
     for i in range(samples.shape[1]):
         x = samples[:, i]
         y = y_list[:, i]
@@ -96,8 +134,8 @@ def get_dataset(smpl_path: str, muti_target: bool = False, threshold=0.4):
         x = torch.as_tensor(x, dtype=torch.float32)
         y = torch.as_tensor(y, dtype=int)
         assert (x.dim() == 2)
-        data = Data(x=x, y=y, adj=adj, edge_index=edge_index)
-        data_list.append(data)
+        edge_data = Data(x=x, y=y, adj=adj, edge_index=edge_index)
+        data_list.append(edge_data)
 
     return data_list
 

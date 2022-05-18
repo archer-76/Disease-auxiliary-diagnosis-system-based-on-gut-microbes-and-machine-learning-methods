@@ -1,4 +1,6 @@
+from typing import Dict
 import torch
+import time
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 from torch.utils.data import random_split
@@ -17,18 +19,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 # device = torch.device('cpu')
 
-model_path = './models/gmlp_model.pth'
-smpl_path = './data/samples.csv'
+smpl_path = 'cirrhosis'
 
-batch_size = 16
-learning_rate = 1e-2
-weight_decay = 1e-3
-epoch_num = 500
-train_radio = 0.5
-valid_radio = 0.5 - train_radio / 2
-
-is_use_gpu = torch.cuda.is_available()
-is_save_model = True
+only_evaluation = False
 
 
 def unbatched_train(train_loader, model):
@@ -81,14 +74,16 @@ def unbatched_test(test_loader, model):
     return correct / num_graph
 
 
-def batched_train(loader, model):
+def batched_train(loader, model, optimizer):
     model.train()
     epoch_loss = 0.
-    iter_precise = 0.
+    iter_acc = iter_auc = 0.
     timer = 0
     for _, batch in enumerate(loader):
         # 这里解决了一个问题，之前是放在batch之外的
         loss = 0.
+        lables_list = []
+        probs_list = []
         for data in batch.to_data_list():
             x, edge_index, y = data.x, data.edge_index, data.y
             dense_y = torch.sparse_coo_tensor(
@@ -104,27 +99,71 @@ def batched_train(loader, model):
             out = out.reshape((out.shape[0], -1))
             loss += model.loss(out, y)
             timer += 1
-            iter_precise = iter_precise + metrics.precision_score(
+            iter_acc = iter_acc + metrics.accuracy_score(
                 y.cpu().detach(),
-                out.cpu().detach().argmax(dim=1),
-                average='micro')
-            # iter_precise = iter_precise + metrics.precision_score(
+                out.cpu().detach().argmax(dim=1))
+            lables_list.append(y.cpu().detach()[0])
+            probs_list.append(out.cpu().detach()[0][1])
+            # iter_acc = iter_acc + metrics.precision_score(
             #     y.cpu().detach(), y.cpu().detach(), average='micro')
+            # if y.cpu().detach() == 1 and out.cpu().detach().argmax(dim=1) == 1:
+            #     iter_auc += 1
         loss.backward()
+        lables = np.array(lables_list)
+        probs = np.array(probs_list)
+        try:
+            iter_auc += metrics.roc_auc_score(lables, probs)
+        except:
+            iter_auc += 0.5
         # 梯度截断防止梯度爆炸导致过拟合，类似于dropout
         torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
         optimizer.step()
         optimizer.zero_grad()
         epoch_loss += loss.item()
 
-    return epoch_loss / len(loader), iter_precise / timer
+    return epoch_loss / len(loader), iter_acc / timer, iter_auc / len(loader)
 
 
+def calcAUC_byProb(labels, probs):
+    N = 0  # 正样本数量
+    P = 0  # 负样本数量
+    neg_prob = []  # 负样本的预测值
+    pos_prob = []  # 正样本的预测值
+    for index, label in enumerate(labels):
+        if label == 1:
+            # 正样本数++
+            P += 1
+            # 把其对应的预测值加到“正样本预测值”列表中
+            pos_prob.append(probs[index][0][1])
+            print("positive", probs[index][0][1])
+        else:
+            # 负样本数++
+            N += 1
+            # 把其对应的预测值加到“负样本预测值”列表中
+            neg_prob.append(probs[index][0][0])
+            print("negative", probs[index][0][0])
+    number = 0.
+    # 遍历正负样本间的两两组合
+    for pos in pos_prob:
+        for neg in neg_prob:
+            # 如果正样本预测值>负样本预测值，正序对数+1
+            print("pos", pos, "neg", neg)
+            if (pos > neg):
+                number += 1
+            # 如果正样本预测值==负样本预测值，算0.5个正序对
+            elif (pos == neg):
+                number += 0.5
+    return number / (N * P)
+
+
+# @torch.no_grad
 def batched_test(loader, model, testing: bool = False):
     model.eval()
-    iter_precise = 0.
+    iter_acc = iter_auc = 0.
     timer = 0
     for _, batch in enumerate(loader):
+        lables_list = []
+        probs_list = []
         for data in batch.to_data_list():
             x, edge_index, y = data.x, data.edge_index, data.y
             dense_y = torch.sparse_coo_tensor(
@@ -141,51 +180,106 @@ def batched_test(loader, model, testing: bool = False):
             timer += 1
             if testing:
                 print('out', out.argmax(dim=1), 'y', y)
-            iter_precise = iter_precise + metrics.precision_score(
+
+            lables_list.append(y.cpu().detach()[0])
+            probs_list.append(out.cpu().detach()[0][1])
+            iter_acc = iter_acc + metrics.accuracy_score(
                 y.cpu().detach(),
-                out.cpu().detach().argmax(dim=1),
-                average='micro')
+                out.cpu().detach().argmax(dim=1))
+        lables = np.array(lables_list)
+        probs = np.array(probs_list)
+        try:
+            iter_auc += metrics.roc_auc_score(lables, probs)
+        except:
+            iter_auc += 0.5
 
-    return iter_precise / timer
+    return iter_acc / timer, iter_auc / len(loader)
 
 
-if __name__ == '__main__':
-    data_list = get_dataset(smpl_path, muti_target=True, threshold=0.32)
+def graph_model_evaluation(data_dict: dict):
+
+    batch_size = int(data_dict["batchsize"])
+    epoch_num = int(data_dict["epoch"])
+    threshold = int(data_dict["threshold"])
+    feature = int(data_dict["feature"])
+    disease = data_dict["dataset"]
+    only_evaluation = bool(data_dict["only_evaluation"])
+
+    is_loading_model = True
+
+    learning_rate = 1e-3
+    train_radio = 0.6
+    valid_radio = 0.5 - train_radio / 2
+    model_path = './models/' + disease + ".pth"
+
+    data_list = get_dataset(disease, threshold, feature)
     # data_list = get_benchmark_dataset('PROTEINS')
     train_list, test_list, validation_list = random_split(
-        data_list,
-        (int(train_radio * len(data_list)), int(valid_radio * len(data_list)),
-         (len(data_list) - int(train_radio * len(data_list)) -
-          int(valid_radio * len(data_list)))))
+        data_list, [
+            int(train_radio * len(data_list)),
+            int(valid_radio * len(data_list)),
+            len(data_list) - int(train_radio * len(data_list)) -
+            int(valid_radio * len(data_list))
+        ],
+        generator=torch.Generator().manual_seed(520))
 
     train_loader = DataLoader(train_list, batch_size, shuffle=True)
     validation_loader = DataLoader(validation_list, batch_size)
     test_loader = DataLoader(test_list, batch_size)
 
-    valid_precise_list = np.zeros((1))
     in_feature = train_list[0].x.shape[1]
     classes = max([item.y for item in data_list]) + 1
     maxmum_nodes = max([item.x.shape[0] for item in data_list])
     pool_size = ceil(maxmum_nodes * 0.25)
+
     model = BatchedModel(pool_size,
                          input_shape=in_feature,
                          n_classes=int(classes),
                          device=device).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    best_acc = 0.
+    toc1 = time.perf_counter()
 
-    optimizer = optim.Adam(model.parameters())
-    for e in tqdm(range(epoch_num)):
-        train_loss, train_precise = batched_train(train_loader, model)
-        valid_precise = batched_test(validation_loader, model)
-        valid_precise_list = np.vstack((valid_precise_list, valid_precise))
-        tqdm.write(
-            f'''Epoch:{e+1} \t train_precise:{train_precise:.3f} \t valid_precise:{valid_precise:.3f} \t train_loss:{train_loss:.3f}'''
-        )
-    # model.load_state_dict(torch.load(model_path))
-    test_precise = batched_test(test_loader, model, True)
-    print('test_precise', test_precise, 'max_valid_precise',
-          np.max(valid_precise_list))
+    if ~only_evaluation:
+        for e in tqdm(range(epoch_num)):
+            train_loss, train_acc, train_auc = batched_train(
+                train_loader, model, optimizer)
+            valid_acc, valid_auc = batched_test(validation_loader, model)
+            if valid_acc >= best_acc:
+                best_acc = valid_acc
+                # state = {
+                #     'net': model.state_dict(),
+                #     'optimizer': optimizer.state_dict(),
+                #     'epoch': e
+                # }
+                torch.save(model, model_path)
+            tqdm.write(
+                f'''Epoch:{e+1} \t train: {train_acc:.3f}\t {train_auc:.3f} \t valid: {valid_acc:.3f}\t {valid_auc:.3f} \t {train_loss:.3f}'''
+            )
+    toc2 = time.perf_counter()
+
+    if is_loading_model:
+        model = torch.load(model_path)
+        print('load done')
+    test_acc, test_auc = batched_test(test_loader, model, optimizer, True)
+    toc3 = time.perf_counter()
+
+    print(
+        f'''test_acc, {test_acc:.3f} {test_auc:.3f}, max_valid_acc, {best_acc:.3f},runtime,{toc3-toc2}'''
+    )
     # save last model
-    if is_save_model:
-        torch.save(model.state_dict(), model_path)
-    #
-    # train_model(model, data_loader)
+    # if is_save_model:
+
+    # load best model
+
+
+if __name__ == "__main__":
+    data_dict = {
+        "batchsize": "16",
+        "epoch": "150",
+        "threshold": "50",
+        "feature": "90",
+        "dataset": "cirrhosis",
+        "only_evaluation": "False",
+    }
+    graph_model_evaluation(data_dict)
