@@ -2,6 +2,7 @@ from unittest import result
 import numpy as np
 import pandas as pd
 import os
+from keras.layers import *
 
 import tensorflow.keras as keras
 from tensorflow.keras.models import Sequential, Model
@@ -42,7 +43,7 @@ def dnn_model(input_d, c_num):
     #model.add(Dropout(0.3))
     #model.add(Dense(256,activation='relu'))
     #model.add(Dropout(0.5))
-    model.add(Dense(256, activation='relu', name='feature'))
+    model.add(Dense(256, activation='relu'))
     model.add(Dense(c_num, activation='softmax'))
 
     model.compile(loss=keras.losses.sparse_categorical_crossentropy,
@@ -133,7 +134,6 @@ def basic_model_inferrence(para_dict: dict, diagnosizing: bool = False):
     #样本标签
     df = pd.DataFrame([disease.split(':')])
     label = pd.DataFrame([0] * len(data))
-    print(range(len(df)))
     label[(data[df.iloc[0, 1]].isin(df.iloc[0, 2:])).tolist()] = 1
     #print(label.values.flatten())
 
@@ -194,6 +194,7 @@ def basic_model_inferrence(para_dict: dict, diagnosizing: bool = False):
             elif classifier == "1D-CNN":
                 train_data = np.expand_dims(train_data, axis=2)
                 val_data = np.expand_dims(val_data, axis=2)
+                print("val_data.shape", val_data.shape)
 
                 clf = scikit_learn.KerasClassifier(build_fn=cnn_model,
                                                    epochs=epoch,
@@ -214,9 +215,13 @@ def basic_model_inferrence(para_dict: dict, diagnosizing: bool = False):
                 clf.fit(train_data, train_label.values.flatten())  #rf
 
             elif classifier == "SVM":
-                clf = SVC(kernel='rbf', probability=True)
-                print("train_data", train_data.shape, "train_label",
-                      train_label.shape)
+                clf = SVC(C=1,
+                          kernel='rbf',
+                          probability=True,
+                          verbose=2,
+                          gamma=1)
+                # print("train_data", train_data.shape, "train_label",
+                #       train_label.shape)
                 clf.fit(train_data, train_label.values.flatten())  #rf
 
             val_pred = clf.predict(val_data)
@@ -235,14 +240,17 @@ def basic_model_inferrence(para_dict: dict, diagnosizing: bool = False):
 
             if class_num == 2:
                 val_scores = clf.predict_proba(val_data)[:, 1]
-                print("shapes", val_label.shape, val_scores.shape,
-                      clf.predict_proba(val_data).shape)
+                # print("shapes", val_label.shape, val_scores.shape,
+                #   clf.predict_proba(val_data).shape)
                 auc = metrics.roc_auc_score(val_label, val_scores)
                 aucs.append(auc)
-                print("auc= %.3f on validation set" % auc)
+                # print("auc= %.3f on validation set" % auc)
 
     result_list = []
     if diagnosizing:
+        print("diagnosis_data.shape", diagnosis_data.shape)
+        if classifier == "1D-CNN":
+            diagnosis_data = np.expand_dims(diagnosis_data, axis=2)
         new_pred = clf.predict(diagnosis_data)
         print("new_pred", new_pred)
         diagnosis_df['disease'] = new_pred
@@ -254,7 +262,7 @@ def basic_model_inferrence(para_dict: dict, diagnosizing: bool = False):
             result_list.append((dd['sampleID'], dd['gender'], dd['age'],
                                 dd['country'], dd['disease']))
         diagnosis_df.T.to_csv(diagnosis_path, header=None)
-    print(result_list)
+    # print(result_list)
     print("average acc: %.3f (+/- %.3f)" % (np.mean(accs), np.std(accs)))
     average_acc = np.mean(accs)
     #print("average precision: %.4f (+/- %.4f)" % (np.mean(precisions), np.std(precisions)))
@@ -269,13 +277,14 @@ def basic_model_inferrence(para_dict: dict, diagnosizing: bool = False):
     return average_acc, average_auc, result_list
 
 
+# 1D-CNN DNN
 if __name__ == "__main__":
     para_dict = {
         "dataset": "cirrhosis",
-        "classifier": "SVM",
+        "classifier": "1D-CNN",
         "epoch": "5",
         "batchsize": "32",
-        "feature": "50",
+        "feature": "90",
     }
     # para_dict = {}
     basic_model_inferrence(para_dict, True)

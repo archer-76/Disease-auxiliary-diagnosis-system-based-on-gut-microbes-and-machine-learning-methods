@@ -54,7 +54,7 @@ def compute_feature_importance(clf, feature):
 
 def process(para_dict: dict):
     i = para_dict["i"]
-    print("patient", i, "th")
+    print(i)
     data_disease = para_dict["data_disease"]
     subjectID = para_dict["subjectID"]
     clf = para_dict["clf"]
@@ -97,12 +97,13 @@ def process(para_dict: dict):
             #   clf.predict_proba(temp)[:, 0])
             p = clf.predict_proba(temp)[:, 0]
             # print("p", p)
-
+            # 一次尝试 1/step组，只要该组中有一个丰度能够使健康概率增加就选用该值
             if np.max(p) > max:
                 max_pro = np.max(p)
+                # 找到该值的序号
                 max_num = np.argmax(p) * step
                 # print("max_num", max_num)
-
+                # 调整1/step组中该菌的丰度
                 temp[f] = [max_num] * (int(1 / step) + 1)
                 max = max_pro
                 stable = False
@@ -122,6 +123,7 @@ def process(para_dict: dict):
 
                 if stable:
                     treat = temp.iloc[0]
+                    # 调整会原址
                     patient = patient * (data_raw.max() -
                                          data_raw.min()) + data_raw.min()
                     treat = treat * (data_raw.max() -
@@ -218,10 +220,10 @@ def disease_diagnosize(disease_name: str):
     record = result[0][0].split(":")
     sample_i = record[0]
     treatment_i = record[1]
-    print('sample_i', sample_i, 'treatment_i', treatment_i)
-    print("type(treatment_i)", type(treatment_i))
-    print("spilted", str(treatment_i).split("\n"))
-    print("I am result len", len(result))
+    # print('sample_i', sample_i, 'treatment_i', treatment_i)
+    # print("type(treatment_i)", type(treatment_i))
+    # print("spilted", str(treatment_i).split("\n"))
+    # print("I am result len", len(result))
     return result, "共运行了 " + str(end - start)[:8] + " s"
 
 

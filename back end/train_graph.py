@@ -1,4 +1,5 @@
-from typing import Dict
+from random import sample
+from unittest import result
 import torch
 import time
 import torch.nn.functional as F
@@ -11,10 +12,10 @@ from tqdm import tqdm
 from utils import *
 from models import *
 from sklearn import metrics
+import sqlite3
 # DEBUG
-import os
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+import os
 
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 # device = torch.device('cpu')
@@ -196,23 +197,35 @@ def batched_test(loader, model, testing: bool = False):
     return iter_acc / timer, iter_auc / len(loader)
 
 
-def graph_model_evaluation(data_dict: dict):
+def graph_model_evaluation(data_dict: dict, diagnosizing=False):
 
     batch_size = int(data_dict["batchsize"])
     epoch_num = int(data_dict["epoch"])
     threshold = int(data_dict["threshold"])
     feature = int(data_dict["feature"])
     disease = data_dict["dataset"]
-    only_evaluation = bool(data_dict["only_evaluation"])
+    diagnosizing = diagnosizing
+
+    disease_path = "./back end/data/" + disease + ".csv"
+    diagnosis_path = "./back end/diagnosis/" + disease + ".csv"
 
     is_loading_model = True
 
+    best_acc = 0.
     learning_rate = 1e-3
     train_radio = 0.6
     valid_radio = 0.5 - train_radio / 2
     model_path = './models/' + disease + ".pth"
 
-    data_list = get_dataset(disease, threshold, feature)
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    EvaluationHistory_path = os.path.join(BASE_DIR, "EvaluationHistory.db")
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    data_list = get_dataset(disease_path, disease, threshold, feature)
+    if diagnosizing:
+        diagnosis_list = get_dataset(diagnosis_path, disease, threshold,
+                                     feature)
+
     # data_list = get_benchmark_dataset('PROTEINS')
     train_list, test_list, validation_list = random_split(
         data_list, [
@@ -226,6 +239,8 @@ def graph_model_evaluation(data_dict: dict):
     train_loader = DataLoader(train_list, batch_size, shuffle=True)
     validation_loader = DataLoader(validation_list, batch_size)
     test_loader = DataLoader(test_list, batch_size)
+    if diagnosizing:
+        diagnosis_loader = DataLoader(diagnosis_list, batch_size)
 
     in_feature = train_list[0].x.shape[1]
     classes = max([item.y for item in data_list]) + 1
@@ -237,15 +252,28 @@ def graph_model_evaluation(data_dict: dict):
                          n_classes=int(classes),
                          device=device).to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    best_acc = 0.
-    toc1 = time.perf_counter()
-
-    if ~only_evaluation:
+    conn = sqlite3.connect(EvaluationHistory_path)
+    c = conn.cursor()
+    cursor = c.execute(
+        '''
+            SELECT MAX(acc)
+            FROM EvaluationHistory
+            WHERE classifier = ? AND dataset = ?         
+            ''', ["GNN", disease])
+    cursors = cursor.fetchall()
+    for record in cursors:
+        tmp_list = list(record)
+        if tmp_list != [None]:
+            best_acc = float(tmp_list[0])
+    print("best acc = ", best_acc)
+    if (not diagnosizing):
         for e in tqdm(range(epoch_num)):
             train_loss, train_acc, train_auc = batched_train(
                 train_loader, model, optimizer)
             valid_acc, valid_auc = batched_test(validation_loader, model)
             if valid_acc >= best_acc:
+                print("当前模型更加优秀！", valid_acc, "超过了", best_acc)
+
                 best_acc = valid_acc
                 # state = {
                 #     'net': model.state_dict(),
@@ -257,16 +285,52 @@ def graph_model_evaluation(data_dict: dict):
                 f'''Epoch:{e+1} \t train: {train_acc:.3f}\t {train_auc:.3f} \t valid: {valid_acc:.3f}\t {valid_auc:.3f} \t {train_loss:.3f}'''
             )
     toc2 = time.perf_counter()
-
+    result_list = []
     if is_loading_model:
         model = torch.load(model_path)
         print('load done')
-    test_acc, test_auc = batched_test(test_loader, model, optimizer, True)
+    if diagnosizing:
+        model.eval()
+        diagnosis_df = pd.read_csv(diagnosis_path,
+                                   header=None,
+                                   index_col=0,
+                                   low_memory=False).T
+        new_pred = []
+        for _, batch in enumerate(diagnosis_loader):
+            for data in batch.to_data_list():
+                x, edge_index, y = data.x, data.edge_index, data.y
+                dense_y = torch.sparse_coo_tensor(
+                    edge_index, torch.ones(edge_index.shape[1]),
+                    torch.Size([x.shape[0], x.shape[0]]))
+                adj = dense_y.to_dense()
+                if adj.dim() == 2:
+                    x = x.reshape((1, x.shape[0], x.shape[1]))
+                    adj = adj.reshape((1, adj.shape[0], adj.shape[1]))
+                # adj = adj @ adj
+                x, adj, y = x.to(device), adj.to(device), y.to(device)
+                out = model(x, adj, None)
+                out = out.reshape((out.shape[0], -1))
+                pred = out.cpu().detach().argmax(dim=1).reshape(-1)
+                new_pred.append(int(pred[0]))
+        print(new_pred)
+        diagnosis_df['disease'] = new_pred
+        diagnosis_df['disease'].replace(1, 'positive', inplace=True)
+        diagnosis_df['disease'].replace(0, 'negative', inplace=True)
+
+        for i in range(len(diagnosis_df)):
+            dd = diagnosis_df.iloc[i]
+            result_list.append((dd['sampleID'], dd['gender'], dd['age'],
+                                dd['country'], dd['disease']))
+        diagnosis_df.T.to_csv(diagnosis_path, header=None)
+
+    test_acc, test_auc = batched_test(test_loader, model, True)
     toc3 = time.perf_counter()
 
     print(
         f'''test_acc, {test_acc:.3f} {test_auc:.3f}, max_valid_acc, {best_acc:.3f},runtime,{toc3-toc2}'''
     )
+
+    return str(test_acc)[:6], str(test_auc)[:6], result_list
     # save last model
     # if is_save_model:
 
@@ -276,10 +340,11 @@ def graph_model_evaluation(data_dict: dict):
 if __name__ == "__main__":
     data_dict = {
         "batchsize": "16",
-        "epoch": "150",
+        "epoch": "5",
         "threshold": "50",
         "feature": "90",
         "dataset": "cirrhosis",
         "only_evaluation": "False",
     }
-    graph_model_evaluation(data_dict)
+    _, _, result_list = graph_model_evaluation(data_dict, True)
+    print(result_list)

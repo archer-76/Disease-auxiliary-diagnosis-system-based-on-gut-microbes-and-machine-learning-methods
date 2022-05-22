@@ -4,7 +4,6 @@ from flask import Flask, request
 from flask import jsonify
 from flask_cors import CORS
 import json
-from test_file import *
 import sys
 import sqlite3
 from sqlite3.dbapi2 import Cursor
@@ -13,6 +12,7 @@ import datetime
 import pandas as pd
 from disease_classifier import *
 from disease_diagnosizer import *
+from train_graph import *
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DiagnosisHistory_path = os.path.join(BASE_DIR, "DiagnosisHistory.db")
@@ -94,6 +94,7 @@ def ModelEvaluation():
             'WT2D': ['GNN', '64', 'DiffPool', '100', '16', '36'],
         }
     elif request.method == 'POST':
+
         data = request.get_data()
         data_dict = json.loads(data)
         # 假定读取完为一个字典
@@ -103,7 +104,11 @@ def ModelEvaluation():
         str_time = current_time.strftime('%Y%m%d%H%M%S%f')[:-3]
         HistoryID = "{0}".format(str_time)
         record_list.insert(0, HistoryID)
-        acc, auc, _ = basic_model_inferrence(data_dict, False)
+        print(data_dict["classifier"])
+        if (data_dict["classifier"] == "GNN"):
+            acc, auc, _ = graph_model_evaluation(data_dict, False)
+        else:
+            acc, auc, _ = basic_model_inferrence(data_dict, False)
         print('evaluation result', acc, auc)
         record_list.append(acc)
         record_list.append(auc)
@@ -191,7 +196,11 @@ def DieaseDiagnosize():
         record_list.insert(0, HistoryID)
         # 结果为一个二维列表，第二维度中装了specfichistory中的信息
         # 输入：OTU表路径和一堆参数，输出：二维列表(sample_num,feature_num)
-        _, _, diagnosis_result = basic_model_inferrence(data_dict, True)
+
+        if (data_dict["classifier"] == "GNN"):
+            _, _, diagnosis_result = graph_model_evaluation(data_dict, True)
+        else:
+            _, _, diagnosis_result = basic_model_inferrence(data_dict, True)
         record_list.append(
             datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S'))
         response = {

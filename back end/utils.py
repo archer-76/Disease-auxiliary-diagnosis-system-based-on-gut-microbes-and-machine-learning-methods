@@ -41,7 +41,8 @@ def get_benchmark_dataset(dataset_name='ENZYMES'):
     return datalist
 
 
-def get_dataset(disease_name: str,
+def get_dataset(smpl_path: str,
+                disease_name: str,
                 threshold=40,
                 feature=90.,
                 muti_target: bool = False):
@@ -62,7 +63,6 @@ def get_dataset(disease_name: str,
     feature = feature / 100
     threshold = threshold / 100
 
-    smpl_path = './back end/data/' + disease_name + '.csv'
     disease = "1:disease:" + disease_name
     data_list = []
     disease_list = []
@@ -94,7 +94,7 @@ def get_dataset(disease_name: str,
     df = pd.DataFrame([disease.split(':')])
     label = pd.DataFrame([0] * len(data))
     label[(data[df.iloc[0, 1]].isin(df.iloc[0, 2:])).tolist()] = 1
-    #print(label.values.flatten())
+
     # 讲特征的更新同步到数据
     data = data.loc[:, feat].astype('float')
     data = (data - data.min()) / (data.max() - data.min())
@@ -111,7 +111,7 @@ def get_dataset(disease_name: str,
     samples = data.to_numpy(dtype=np.float32).T
 
     y_list = label.to_numpy(dtype=int).T
-    # 按照首字母排序，n的下标为3，第四个，如果不是多分类任务，设置n为0，其他为1
+    print(y_list)
     for i in range(np.max(y_list) + 1):
         mask = y_list == i
         mask = mask.reshape((mask.shape[1]))
@@ -120,7 +120,7 @@ def get_dataset(disease_name: str,
 
     giant_edge_index, giant_adj = construct_adj(disease_list,
                                                 names='pcc mic spm',
-                                                methods=(spm, pcc),
+                                                methods=(mic, spm, pcc),
                                                 score_thresh=threshold)
     print(
         f'{np.count_nonzero(giant_adj)} pred out of {samples.shape[0]**2} true'
@@ -140,10 +140,6 @@ def get_dataset(disease_name: str,
     return data_list
 
 
-# 在测试后，cutoff为0.62，0.64，0.68的时候卡方检验泊松分布转化完成
-# p-value分别为0.05,0.01,0.001，此x必须是t2d数据集
-# 如果更换数据集，请重新使用MENA软件测试http://ieg4.rccc.ou.edu/mena/
-# 对于giant_matrix多次检验结果分别是0.66，0.68，0.69
 def construct_adj(xs: list,
                   names: str,
                   methods: tuple[function, ...],
