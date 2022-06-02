@@ -9,20 +9,8 @@
       <i class="el-icon-menu"></i>
     </span>
     <!-- 系统标题 -->
-    <h3 class="header-title margin-l-10">微生物疾病关系分析系统</h3>
+    <h3 class="header-title margin-l-10">疾病辅助诊断系统</h3>
     <div class="header-right">
-      <!-- 消息中心 -->
-      <div class="btn-info">
-        <el-tooltip placement="bottom">
-          <span slot="content">{{
-            message ? `有${message}条消息` : "消息中心"
-          }}</span>
-          <router-link to="/info">
-            <i class="el-icon-bell"></i>
-          </router-link>
-        </el-tooltip>
-        <span class="btn-info-tip" v-if="message"></span>
-      </div>
       <!-- 用户头像 -->
       <img class="header-portrait" src="static/portrait.jpg" alt="用户头像" />
       <!-- 用户名下拉菜单 -->
@@ -32,12 +20,6 @@
           <i class="el-icon-caret-bottom"></i>
         </span>
         <el-dropdown-menu slot="dropdown">
-          <a
-            href="https://github.com/nut77/vue2-elementui-admin"
-            target="_blank"
-          >
-            <el-dropdown-item>项目仓库</el-dropdown-item>
-          </a>
           <el-dropdown-item divided command="loginout"
             >退出登录</el-dropdown-item
           >

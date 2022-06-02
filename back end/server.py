@@ -1,18 +1,14 @@
-from random import sample
-from unittest import result
 from flask import Flask, request
 from flask import jsonify
 from flask_cors import CORS
 import json
-import sys
 import sqlite3
-from sqlite3.dbapi2 import Cursor
 import os.path
 import datetime
 import pandas as pd
-from disease_classifier import *
+from basic_classifier import *
 from disease_diagnosizer import *
-from train_graph import *
+from graph_classifier import graph_model_evaluation
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DiagnosisHistory_path = os.path.join(BASE_DIR, "DiagnosisHistory.db")
@@ -104,7 +100,7 @@ def ModelEvaluation():
         str_time = current_time.strftime('%Y%m%d%H%M%S%f')[:-3]
         HistoryID = "{0}".format(str_time)
         record_list.insert(0, HistoryID)
-        print(data_dict["classifier"])
+
         if (data_dict["classifier"] == "GNN"):
             acc, auc, _ = graph_model_evaluation(data_dict, False)
         else:
@@ -114,7 +110,12 @@ def ModelEvaluation():
         record_list.append(auc)
         record_list.append(
             datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S'))
+        if (data_dict["classifier"] == "RF"
+                or data_dict["classifier"] == "SVM"):
+            record_list[5] = "_"
+            record_list[6] = "_"
         print('Evaluation', record_list)
+
         response = {'finished': True, 'acc': acc, 'auc': auc}
         conn = sqlite3.connect(EvaluationHistory_path)
         c = conn.cursor()
@@ -196,7 +197,10 @@ def DieaseDiagnosize():
         record_list.insert(0, HistoryID)
         # 结果为一个二维列表，第二维度中装了specfichistory中的信息
         # 输入：OTU表路径和一堆参数，输出：二维列表(sample_num,feature_num)
-
+        if (data_dict["classifier"] == "1D-CNN"):
+            os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+        else:
+            os.environ['CUDA_VISIBLE_DEVICES'] = '1'
         if (data_dict["classifier"] == "GNN"):
             _, _, diagnosis_result = graph_model_evaluation(data_dict, True)
         else:
@@ -207,6 +211,10 @@ def DieaseDiagnosize():
             'finished': True,
         }
         print(len(record_list), record_list)
+        if (data_dict["classifier"] == "RF"
+                or data_dict["classifier"] == "SVM"):
+            record_list[5] = "_"
+            record_list[6] = "_"
         conn = sqlite3.connect(DiagnosisHistory_path)
         c = conn.cursor()
         cursor = c.execute(

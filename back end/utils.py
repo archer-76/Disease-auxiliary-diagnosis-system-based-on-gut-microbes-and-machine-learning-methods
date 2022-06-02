@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 import torch
 from scipy.sparse import coo_matrix
-from sklearn.preprocessing import LabelEncoder
 from torch_geometric.data import Data
 # load dataset
 from sklearn.ensemble import RandomForestClassifier
@@ -111,7 +110,6 @@ def get_dataset(smpl_path: str,
     samples = data.to_numpy(dtype=np.float32).T
 
     y_list = label.to_numpy(dtype=int).T
-    print(y_list)
     for i in range(np.max(y_list) + 1):
         mask = y_list == i
         mask = mask.reshape((mask.shape[1]))
@@ -120,7 +118,7 @@ def get_dataset(smpl_path: str,
 
     giant_edge_index, giant_adj = construct_adj(disease_list,
                                                 names='pcc mic spm',
-                                                methods=(mic, spm, pcc),
+                                                methods=(spm, pcc),
                                                 score_thresh=threshold)
     print(
         f'{np.count_nonzero(giant_adj)} pred out of {samples.shape[0]**2} true'

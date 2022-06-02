@@ -57,7 +57,81 @@
       ></el-col>
     </el-row>
     <el-divider content-position="left">模型参数</el-divider>
-    <el-row :gutter="20" type="flex" class="row-bg" justify="center">
+    <el-row
+      :gutter="20"
+      type="flex"
+      class="row-bg"
+      justify="center"
+      v-if="classifier_value == 'RF'"
+    >
+      <el-col :span="8"
+        ><el-form
+          :model="ruleForm"
+          status-icon
+          :rules="rules"
+          ref="ruleForm"
+          label-width="100px"
+          class="demo-ruleForm"
+        >
+          <el-form-item label="criterion:" prop="criterion">
+            <el-input v-model.number="RfCriterion" :disabled="true"></el-input>
+          </el-form-item> </el-form
+      ></el-col>
+      <el-col :span="8"
+        ><el-form
+          :model="ruleForm"
+          status-icon
+          :rules="rules"
+          ref="ruleForm"
+          label-width="150px"
+          class="demo-ruleForm"
+        >
+          <el-form-item label="min_samples_split:" prop="min_samples_split">
+            <el-input v-model.number="RfStop" :disabled="true"></el-input>
+          </el-form-item> </el-form
+      ></el-col>
+    </el-row>
+    <el-row
+      :gutter="20"
+      type="flex"
+      class="row-bg"
+      justify="center"
+      v-if="classifier_value == 'SVM'"
+    >
+      <el-col :span="8"
+        ><el-form
+          :model="ruleForm"
+          status-icon
+          :rules="rules"
+          ref="ruleForm"
+          label-width="100px"
+          class="demo-ruleForm"
+        >
+          <el-form-item label="gamma:" prop="gamma">
+            <el-input v-model.number="SvmGamma" :disabled="true"></el-input>
+          </el-form-item> </el-form
+      ></el-col>
+      <el-col :span="8"
+        ><el-form
+          :model="ruleForm"
+          status-icon
+          :rules="rules"
+          ref="ruleForm"
+          label-width="100px"
+          class="demo-ruleForm"
+        >
+          <el-form-item label="C:" prop="C">
+            <el-input v-model.number="SvmC" :disabled="true"></el-input>
+          </el-form-item> </el-form
+      ></el-col>
+    </el-row>
+    <el-row
+      :gutter="20"
+      type="flex"
+      class="row-bg"
+      justify="center"
+      v-if="classifier_value != 'RF' && classifier_value != 'SVM'"
+    >
       <el-col :span="8"
         ><el-form
           :model="ruleForm"
@@ -84,28 +158,8 @@
             <el-input v-model.number="ruleForm.batchsize"></el-input>
           </el-form-item> </el-form
       ></el-col>
-      <el-col :span="8" v-if="classifier_value == 'GNN'">
-        <el-form
-          :model="ruleForm"
-          status-icon
-          :rules="rules"
-          label-width="100px"
-        >
-          <el-form-item label="图分类方式" prop="graphClassifier">
-            <el-select
-              v-model="graph_classifier_value"
-              placeholder="选择分类方式"
-            >
-              <el-option
-                v-for="item in graph_classifier_options"
-                :key="item.value"
-                :label="item.label"
-                :value="item.value"
-              >
-              </el-option> </el-select
-          ></el-form-item> </el-form
-      ></el-col>
     </el-row>
+
     <el-divider content-position="left">特征选择(百分比)</el-divider>
     <el-row :gutter="20" type="flex" class="row-bg" justify="center">
       <el-col :span="16">
@@ -167,9 +221,22 @@
         </el-form></el-col
       >
     </el-row>
-    <el-divider v-if="finished" content-position="left">结果查看</el-divider>
     <el-row
-      v-if="finished"
+      v-if="!notprocessing"
+      :gutter="20"
+      type="flex"
+      class="row-bg"
+      justify="center"
+    >
+      <el-col :span="8">
+        <el-card shadow="hover"> 正在诊断疾病，时间漫长，请您稍等</el-card>
+      </el-col>
+    </el-row>
+    <el-divider v-if="finished && notprocessing" content-position="left"
+      >结果查看</el-divider
+    >
+    <el-row
+      v-if="finished && notprocessing"
       :gutter="20"
       type="flex"
       class="row-bg"
@@ -219,6 +286,10 @@ export default {
       }, 500);
     };
     return {
+      SvmGamma: 1,
+      SvmC: 10,
+      RfCriterion: "基尼不纯度",
+      RfStop: "2",
       record: [],
       form: {
         imgSavePath: "",
@@ -342,6 +413,7 @@ export default {
           label: "wt2d",
         },
       ],
+      notprocessing: true,
       staticFiles: [],
       mscUrl: "",
       mscName: "",
@@ -387,8 +459,12 @@ export default {
     },
     sendData() {
       var that = this;
+      this.notprocessing = false;
       // 对应 Python 提供的接口，这里的地址填写下面服务器运行的地址，本地则为127.0.0.1，外网则为 your_ip_address
-      const path = "http://127.0.0.1:5000/DieaseDiagnosize";
+      var path = "http://127.0.0.1:5000/DieaseDiagnosize";
+      if (this.classifier_value == "1D-CNN") {
+        path = "http://127.0.0.1:5555/DieaseDiagnosize";
+      }
       axios
         .post(path, {
           dataset: that.dataset_value,
@@ -411,11 +487,12 @@ export default {
           //   "Success " + response.status + ", " + response.data + ", " + record
           // );
           that.finished = finished;
+          that.notprocessing = true;
           that.accResult = acc;
           that.aucResult = auc;
         })
         .catch(function (error) {
-          alert("Error " + error);
+          alert("本次诊断结果可能出现异常，请勿在较小数据集上使用新颖模型");
         });
     },
     handleRemove(file, fileList) {
@@ -435,6 +512,16 @@ export default {
   watch: {
     premodel_value(val) {
       console.log("val is:", val);
+      this.notprocessing = true;
+      this.finished = false;
+      if (val == "Nothing") {
+        this.classifier_value = "";
+        this.dataset_value = "";
+        this.ruleForm.batchsize = "";
+        this.ruleForm.epoch = "";
+        this.feature = 0;
+        return;
+      }
 
       this.getData();
       let record = this.record;
@@ -466,16 +553,20 @@ export default {
       this.ruleForm.threshold = record[6];
     },
     classifier_value(val) {
+      this.notprocessing = true;
+      this.finished = false;
       if (val != "GNN") {
-        this.threshold = "";
-        this.graph_classifier_value = "";
-        console.log(
-          "when clf not gnn",
-          this.graph_classifier_value + this.threshold
-        );
+        this.ruleForm.epoch = "5";
+        this.ruleForm.batchsize = "16";
+        this.ruleForm.threshold = "_";
+        this.graph_classifier_value = "_";
+        console.log(val, this.graph_classifier_value + this.ruleForm.threshold);
       } else {
-        this.threshold = "40";
+        this.ruleForm.epoch = "50";
+        this.ruleForm.batchsize = "16";
+        this.ruleForm.threshold = "40";
         this.graph_classifier_value = "DiffPool";
+        console.log(this.graph_classifier_value + this.ruleForm.threshold);
       }
     },
   },

@@ -57,7 +57,81 @@
       ></el-col>
     </el-row>
     <el-divider content-position="left">模型参数</el-divider>
-    <el-row :gutter="20" type="flex" class="row-bg" justify="center">
+    <el-row
+      :gutter="20"
+      type="flex"
+      class="row-bg"
+      justify="center"
+      v-if="classifier_value == 'RF'"
+    >
+      <el-col :span="8"
+        ><el-form
+          :model="ruleForm"
+          status-icon
+          :rules="rules"
+          ref="ruleForm"
+          label-width="100px"
+          class="demo-ruleForm"
+        >
+          <el-form-item label="criterion:" prop="criterion">
+            <el-input v-model.number="RfCriterion" :disabled="true"></el-input>
+          </el-form-item> </el-form
+      ></el-col>
+      <el-col :span="8"
+        ><el-form
+          :model="ruleForm"
+          status-icon
+          :rules="rules"
+          ref="ruleForm"
+          label-width="150px"
+          class="demo-ruleForm"
+        >
+          <el-form-item label="min_samples_split:" prop="min_samples_split">
+            <el-input v-model.number="RfStop" :disabled="true"></el-input>
+          </el-form-item> </el-form
+      ></el-col>
+    </el-row>
+    <el-row
+      :gutter="20"
+      type="flex"
+      class="row-bg"
+      justify="center"
+      v-if="classifier_value == 'SVM'"
+    >
+      <el-col :span="8"
+        ><el-form
+          :model="ruleForm"
+          status-icon
+          :rules="rules"
+          ref="ruleForm"
+          label-width="100px"
+          class="demo-ruleForm"
+        >
+          <el-form-item label="gamma:" prop="gamma">
+            <el-input v-model.number="SvmGamma" :disabled="true"></el-input>
+          </el-form-item> </el-form
+      ></el-col>
+      <el-col :span="8"
+        ><el-form
+          :model="ruleForm"
+          status-icon
+          :rules="rules"
+          ref="ruleForm"
+          label-width="100px"
+          class="demo-ruleForm"
+        >
+          <el-form-item label="C:" prop="C">
+            <el-input v-model.number="SvmC" :disabled="true"></el-input>
+          </el-form-item> </el-form
+      ></el-col>
+    </el-row>
+    <el-row
+      :gutter="20"
+      type="flex"
+      class="row-bg"
+      justify="center"
+      v-if="classifier_value != 'RF' && classifier_value != 'SVM'"
+    >
       <el-col :span="8"
         ><el-form
           :model="ruleForm"
@@ -84,27 +158,6 @@
             <el-input v-model.number="ruleForm.batchsize"></el-input>
           </el-form-item> </el-form
       ></el-col>
-      <el-col :span="8" v-if="classifier_value == 'GNN'">
-        <el-form
-          :model="ruleForm"
-          status-icon
-          :rules="rules"
-          label-width="100px"
-        >
-          <el-form-item label="图分类方式" prop="graphClassifier">
-            <el-select
-              v-model="graph_classifier_value"
-              placeholder="选择分类方式"
-            >
-              <el-option
-                v-for="item in graph_classifier_options"
-                :key="item.value"
-                :label="item.label"
-                :value="item.value"
-              >
-              </el-option> </el-select
-          ></el-form-item> </el-form
-      ></el-col>
     </el-row>
     <el-divider content-position="left">特征选择(百分比)</el-divider>
     <el-row :gutter="20" type="flex" class="row-bg" justify="center">
@@ -114,6 +167,9 @@
     </el-row>
     <el-divider content-position="left">训练模型</el-divider>
     <el-row :gutter="20" type="flex" class="row-bg" justify="center">
+      <el-col :span="8" v-if="!notprocessing">
+        <el-card shadow="hover"> 正在评估模型，请您稍等</el-card>
+      </el-col>
       <el-col :span="6">
         <el-form
           :model="ruleForm"
@@ -132,17 +188,11 @@
       >
     </el-row>
     <el-divider content-position="left" v-if="finished">结果查看</el-divider>
-    <el-row
-      :gutter="20"
-      type="flex"
-      class="row-bg"
-      justify="center"
-      v-if="finished"
-    >
-      <el-col :span="4">
+    <el-row :gutter="20" type="flex" class="row-bg" justify="center">
+      <el-col :span="4" v-if="finished && notprocessing">
         <el-card shadow="hover"> {{ accResult }} </el-card>
       </el-col>
-      <el-col :span="4">
+      <el-col :span="4" v-if="finished && notprocessing">
         <el-card shadow="hover"> {{ aucResult }}</el-card>
       </el-col>
     </el-row>
@@ -187,11 +237,15 @@ export default {
     };
     return {
       finished: false,
-
+      SvmGamma: 1,
+      SvmC: 10,
+      RfCriterion: "基尼不纯度",
+      RfStop: "2",
       sliderValue: 0,
       switchValue: true,
       accResult: "",
       aucResult: "",
+      notprocessing: true,
       ruleForm: {
         batchsize: "",
         epoch: "",
@@ -290,6 +344,7 @@ export default {
         });
     },
     sendData() {
+      this.notprocessing = false;
       if (
         this.classifier_value == "" ||
         this.dataset_value == "" ||
@@ -303,7 +358,10 @@ export default {
       }
       var that = this;
       // 对应 Python 提供的接口，这里的地址填写下面服务器运行的地址，本地则为127.0.0.1，外网则为 your_ip_address
-      const path = "http://127.0.0.1:5000/ModelEvaluation";
+      var path = "http://127.0.0.1:5000/ModelEvaluation";
+      if (this.classifier_value == "1D-CNN") {
+        path = "http://127.0.0.1:5555/ModelEvaluation";
+      }
       axios
         .post(path, {
           dataset: that.dataset_value,
@@ -327,6 +385,7 @@ export default {
           // );
           console.log(acc, auc);
           that.finished = finished;
+          that.notprocessing = true;
           that.accResult = "acc: " + acc;
           that.aucResult = "auc: " + auc;
         })
@@ -338,10 +397,14 @@ export default {
   watch: {
     classifier_value(val) {
       if (val != "GNN") {
+        this.ruleForm.epoch = "5";
+        this.ruleForm.batchsize = "16";
         this.ruleForm.threshold = "_";
         this.graph_classifier_value = "_";
         console.log(val, this.graph_classifier_value + this.ruleForm.threshold);
       } else {
+        this.ruleForm.epoch = "50";
+        this.ruleForm.batchsize = "16";
         this.ruleForm.threshold = "40";
         this.graph_classifier_value = "DiffPool";
         console.log(this.graph_classifier_value + this.ruleForm.threshold);

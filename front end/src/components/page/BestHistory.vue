@@ -12,9 +12,6 @@
       @select-all="handleCheckedAllAndCheckedNone"
       @select="handleCheckedAllAndCheckedNone"
     >
-      <el-table-column type="selection" width="45" align="center">
-      </el-table-column>
-
       <el-table-column
         prop="classifier"
         label="classifier"
@@ -29,8 +26,7 @@
       </el-table-column>
       <el-table-column prop="threshold" label="threshold" width="100">
       </el-table-column>
-      <el-table-column prop="pooling" label="pooling" width="100">
-      </el-table-column>
+
       <el-table-column prop="acc" label="acc" width="120" sortable>
       </el-table-column>
       <el-table-column prop="auc" label="auc" width="120" sortable>
@@ -39,18 +35,6 @@
         <template slot-scope="scope">
           <i class="el-icon-time"></i>
           <span style="margin-left: 5px">{{ scope.row.date }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="130" align="center">
-        <template slot-scope="scope">
-          <el-button
-            circle
-            icon="el-icon-delete"
-            type="danger"
-            title="删除"
-            size="small"
-            @click="rowDel(scope.$index, scope.row, $event)"
-          ></el-button>
         </template>
       </el-table-column>
     </el-table>

@@ -3,7 +3,7 @@
     <div class="stat">
       <!--用户卡片-->
       <div class="stat-user">
-        <div class="stat-user__title">微生物疾病关系分析系统</div>
+        <div class="stat-user__title">疾病辅助诊断系统</div>
         <div class="stat-user__detail">
           <p>欢迎您，{{ username }}</p>
           <p>当前时间：{{ nowTime }}</p>
@@ -39,7 +39,10 @@
           </div>
           <p>
             1. 自由选择你的分类器和模型<br />
-            2. 自由选择所参考疾病
+            2. 辅助诊断疾病<br />
+            3. 查看评估记录<br />
+            4. 查看各个模型的最佳效果<br />
+            5. 为每个病人给出个性化诊疗意见<br />
           </p>
         </el-card>
       </el-col>
@@ -50,8 +53,10 @@
             <span><i class="el-icon-news margin-r-5"></i>算法说明</span>
           </div>
           <p>
-            1. 自由选择你的分类器和模型<br />
-            2. 自由选择所参考疾病
+            1. 设计了随机森林算法，支持向量机算法等机器学习算法<br />
+            2. 搭建了全连接神经网络，一维卷积神经网络等模型<br />
+            3. 将新颖的图神经网络应用于本任务<br />
+            4. 可以通过筛选特征，来选择关键微生物<br />
           </p>
         </el-card>
       </el-col>
