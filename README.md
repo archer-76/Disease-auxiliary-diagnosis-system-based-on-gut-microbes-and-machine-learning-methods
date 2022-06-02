@@ -5,7 +5,7 @@ Therefore, this study applies machine learning methods to the analysis of microb
 ## Machine learning-based approach to analyze the association between gut microbes and diseases 
 ### source of data
 &emsp;The study included 2424 samples from eight studies with six diseases and sequencing data from the birdshot method of macrogenomics. 118 diseased and 114 healthy samples were included in the Cirrhosis dataset; 48 patients with rectal cancer and 73 healthy samples with small rectal tumors as control samples in the Colorectal dataset; In the IBD dataset, the disease sample consisted of 25 cases of ulcerative colitis and Crohn's disease, with a total of 85 healthy individuals; the Obesiy dataset contained 164 obese patients and 89 wasted individuals; the T2D dataset contained 170 patients with type 2 diabetes and 174 healthy individuals from China, and the WT2D dataset sample sampled European samples in a similar manner, with a total of 53 patient samples and 43 control samples.
-### methods
+### Methods
 &emsp;I have elaborated 5 models and applied them to the mentioned 6 datasets. They were Support Vector Machine, Random Foerst, deep neural network, one-dimensional convolutional neural network and graph neural network. SVM and RF were implemented based on python package sklearn and the parameter settings were inspired by <a href = "https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1004977">pasolli et al.</a>   
 
 Deep neural network consists of two hidden layers and the number of nodes in each hidden layer various with dataset, e.g. in Cirrhosis dataset two hidden layers contain 512 and 256 nodes respectively.   
@@ -20,4 +20,11 @@ This study then applied the above method to a real disease diagnosis scenario, w
 ## Result
 In the screenshots folders, the results of 5 models were displayed. In addition, I designed feature selection algorithm to improve the performance of models. Firstly, I trained RF model on the trainst to calculate feature importance, later I retained the top k important features and drop the others, k was selected in {5，10，20，30，40，50，60，70，80，90，100，125，150，175，200}. The result improved by this algorithm was displayed in screenshots folder as well. 
 
-Finally, the user interface of the system was displayed in the screenshots folder, containing disease diagnosis module and 
+Finally, the user interface of the system was displayed in the screenshots folder. The system contains disease diagnosis module and disease treatment module and history module. 
+
+## At last
+This a abstract of my graduation dissertation, the full version was written in Chinese and had been attached to this page.
+
+All the functions were tested and checked by my tutor and I displayed all the functions to the teachers, who were in charge of evaluating graduation project. However, I haven't received the records of this graduation project as well as my Bachelor's Degree. It will come no later than 15.07.2022.
+
+Thanks for your patience and consideration, wish you have a good time.
