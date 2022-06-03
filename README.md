@@ -12,7 +12,8 @@
     models.py: models for GNN
 
     utils.py: utils for loading dataset, preprocessing data and so on. 
-* front end/
+* front end/  
+
     use command npm install to install necessary dependencies at this (./front end) directory
     use command npm run dev to run front server and use browser to access this project on localhost:8080  
 
