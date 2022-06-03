@@ -12,12 +12,15 @@
     models.py: models for GNN
 
     utils.py: utils for loading dataset, preprocessing data and so on. 
-* front end:
+* front end/
     use command npm install to install necessary dependencies at this (./front end) directory
     use command npm run dev to run front server and use browser to access this project on localhost:8080  
 
     front end was implement based on Vue framework, source codes are in src directory. I used Vue framework to encapsulate html css and javascript to a component. Each component consists of html css and javascript codes. So that I can call these components at a main html file to reuse them.
-
+* models/   
+    best GNN models on each dataset. 
+* data/   
+    datasets
 ## Background
 &emsp;According to existing academic analyses, certain diseases are closely related to the abundance of microbial communities residing in the human body, and more than 80% of the microorganisms in the human body reside in the gut, which is the largest microbial host site in the human body, and the microbiome in the gut has a direct impact on human health and diseases.
 Therefore, this study applies machine learning methods to the analysis of microbial-disease associations, and builds a diagnostic aid for physicians based on this study.
